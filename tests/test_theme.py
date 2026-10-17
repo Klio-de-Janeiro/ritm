@@ -114,6 +114,12 @@ class ThemeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @unittest.skipUnless(shutil.which("node"), "Node.js required")
+    def test_mobile_theme_and_progress_handlers(self):
+        result = subprocess.run([shutil.which("node"), str(Path(__file__).with_name("mobile_ui.test.cjs"))],
+            capture_output=True, text=True, encoding="utf-8", check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

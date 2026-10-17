@@ -1,4 +1,4 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Ритм</title><link rel="stylesheet" href="mobile.css"><script defer src="mobile.js"></script></head>
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Ритм</title><link rel="stylesheet" href="mobile.css"><script defer src="theme.js"></script><script defer src="appearance.js"></script><script defer src="mobile.js"></script></head>
 <body><header><div class="brand"><img src="icon.png" alt=""><strong>Ритм</strong></div><button id="syncNow" class="quiet" aria-label="Синхронизировать">↻ <span id="syncBadge">Офлайн</span></button></header>
 <main>
 <section id="todayPage"><p class="eyebrow">МАЛЕНЬКИЕ ШАГИ. БОЛЬШОЙ РЕЗУЛЬТАТ.</p><h1>В твоём темпе.</h1><p class="muted" id="dayLabel"></p>
@@ -6,15 +6,62 @@
 <div class="progress-card"><div><strong id="dailyCount">0 / 0</strong><span>Шагов сегодня</span></div><progress id="dailyProgress" max="1" value="0"></progress></div>
 <div class="segmented" aria-label="Фильтр задач"><button data-filter="pending" class="active">В работе</button><button data-filter="done">Готово</button><button data-filter="all">Все</button></div>
 <div id="taskList" class="task-list" aria-live="polite"></div><p class="muted footnote">Все изменения сначала сохраняются на телефоне.</p></section>
-<section id="progressPage" hidden><p class="eyebrow">ТВОИ УСИЛИЯ ИМЕЮТ ЗНАЧЕНИЕ</p><h1>Мой прогресс</h1><div id="progressStats" class="stats"></div><article><h2>Ритм по дням</h2><p class="muted">Нажми на квадратик, чтобы посмотреть выполненные и невыполненные дела.</p><div id="activityGrid" class="activity-grid"></div><label>День истории<input id="reviewDate" type="date"></label><div id="dayReview"></div></article><article><h2>Запланировано, но не выполнено</h2><div id="unfinishedList" class="task-list"></div></article><h2>Выполненные дела</h2><div id="historyList" class="task-list"></div></section>
+<section id="progressPage" hidden><p class="eyebrow">ТВОИ УСИЛИЯ ИМЕЮТ ЗНАЧЕНИЕ</p><h1>Мой прогресс</h1><div id="progressStats" class="stats"></div><article><h2>Ритм по дням</h2><p class="muted">Нажми на квадратик, чтобы посмотреть выполненные и невыполненные дела.</p><div class="activity-calendar"><div class="activity-weekdays" aria-hidden="true"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div><div class="activity-scroll" tabindex="0" aria-label="История активности за 91 день"><div id="activityMonths" class="activity-months" aria-hidden="true"></div><div id="activityGrid" class="activity-grid"></div></div></div><div class="activity-legend" aria-label="Количество выполненных дел"><span>Меньше</span><i data-level="0"></i><i data-level="1"></i><i data-level="2"></i><i data-level="3"></i><span>Больше</span></div><label>День истории<input id="reviewDate" type="date"></label><div id="dayReview"></div></article><article><h2>Запланировано, но не выполнено</h2><div id="unfinishedList" class="task-list"></div></article><h2>Выполненные дела</h2><div id="historyList" class="task-list"></div></section>
 <section id="settingsPage" hidden><h1>Настройки</h1>
 <article><h2>Связь с ноутбуком</h2><p>Открой настройки Ритма на ноутбуке, включи синхронизацию. Подключи устройства к одной доверенной сети Wi-Fi.</p>
 <form id="connectForm"><label>Адрес или строка подключения<input id="serverAddress" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://192.168.1.10:8769" required></label><label>Код подключения<input id="serverToken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Код из настроек ноутбука"></label><button class="primary" type="submit">Сохранить и подключить</button></form>
 <p class="muted">Код вводится один раз. Затем телефон сам ищет сохранённый ноутбук в общей сети, даже если его IP изменился. Можно вставить целиком строку «Адрес|Код». HTTP не шифруется: используй только доверенную частную сеть. В интернет порт открывать не нужно.</p><p id="syncStatus" role="status"></p><button id="disconnect" class="quiet">Отключить обмен</button><div id="conflicts"></div></article>
 <article><h2>Напоминания</h2><label class="toggle"><input type="checkbox" id="notifications">Напоминать о задачах</label><button id="notificationPermission">Разрешить уведомления</button><p id="permissionStatus" class="muted"></p><p class="muted">Напоминания работают без интернета. Режим экономии батареи может задерживать их и фоновую синхронизацию.</p></article>
-<article><h2>Цветовая гамма</h2><div class="palette"><button data-hue="190" class="ocean">Океан</button><button data-hue="270" class="violet">Аметист</button><button data-hue="150" class="forest">Лес</button><button data-hue="25" class="sunset">Закат</button></div>
-<label>Оттенок<input type="range" id="themeHue" min="0" max="360"></label><label>Яркость фона<input type="range" id="themeBrightness" min="2" max="20"></label>
-<div class="color-pair"><label>Цвет фона<input id="backgroundColor" type="color" value="#080f26"></label><label>Акцент<input id="accentColor" type="color" value="#35dcf7"></label></div><button id="resetColors">Вернуть цвета гаммы</button><p class="muted">Оформление телефона сохраняется отдельно от ноутбука.</p></article>
+<article class="appearance-panel"><h2>Оформление</h2><p class="muted">Выбери гамму или настрой детали. Изменения видны сразу; сохрани понравившийся вариант.</p>  <form id="appearanceForm">
+    <fieldset class="theme-options"><legend>Тема приложения</legend>
+      <label class="theme-option"><input type="radio" name="theme" value="neon" checked><span class="theme-card"><span class="theme-sample sample-neon" aria-hidden="true"><i></i><span><b></b><b></b><b></b></span></span><strong>Неоновая</strong><small>Глубокий синий</small></span></label>
+      <label class="theme-option"><input type="radio" name="theme" value="midnight"><span class="theme-card"><span class="theme-sample sample-midnight" aria-hidden="true"><i></i><span><b></b><b></b><b></b></span></span><strong>Ночная</strong><small>Спокойный графит</small></span></label>
+      <label class="theme-option"><input type="radio" name="theme" value="light"><span class="theme-card"><span class="theme-sample sample-light" aria-hidden="true"><i></i><span><b></b><b></b><b></b></span></span><strong>Светлая</strong><small>Больше воздуха</small></span></label>
+    </fieldset>
+    <fieldset class="palette-controls"><legend>Цветовая гамма</legend>
+      <p class="appearance-note">Выбери гамму целиком или настрой оттенок, насыщенность и яркость фона. Смена гаммы вернёт цвета элементов в режим «Авто».</p>
+      <div class="palette-presets" role="group" aria-label="Готовые гаммы">
+        <button type="button" data-palette="ocean" class="palette-preset"><span class="palette-strip palette-ocean"></span>Океан</button>
+        <button type="button" data-palette="violet" class="palette-preset"><span class="palette-strip palette-violet"></span>Аметист</button>
+        <button type="button" data-palette="forest" class="palette-preset"><span class="palette-strip palette-forest"></span>Лес</button>
+        <button type="button" data-palette="sunset" class="palette-preset"><span class="palette-strip palette-sunset"></span>Закат</button>
+      </div>
+      <div class="range-heading"><label for="paletteHue">Оттенок</label><output id="paletteHueValue" for="paletteHue">190°</output></div>
+      <input type="range" id="paletteHue" min="0" max="360" step="1" class="spectrum-range" data-appearance-range="palette_hue">
+      <div class="range-heading"><label for="paletteSaturation">Насыщенность</label><output id="paletteSaturationValue" for="paletteSaturation">80%</output></div>
+      <input type="range" id="paletteSaturation" min="0" max="100" step="1" data-appearance-range="palette_saturation">
+      <div class="range-heading"><label for="backgroundBrightness">Яркость фона</label><output id="backgroundBrightnessValue" for="backgroundBrightness">6%</output></div>
+      <input type="range" id="backgroundBrightness" min="0" max="100" step="1" data-appearance-range="background_brightness">
+    </fieldset>
+    <div class="color-grid quick-colors" aria-label="Основные цвета">
+        <div class="color-control"><label for="color_background_color">Фон окна</label><input type="color" id="color_background_color" data-appearance-color="background_color" aria-label="Фон окна"><button type="button" class="text-button" data-auto-color="background_color">Авто</button></div>
+        <div class="color-control"><label for="color_panel_color">Карточки</label><input type="color" id="color_panel_color" data-appearance-color="panel_color" aria-label="Карточки"><button type="button" class="text-button" data-auto-color="panel_color">Авто</button></div>
+        <div class="color-control"><label for="color_accent_color">Акцент</label><input type="color" id="color_accent_color" data-appearance-color="accent_color" aria-label="Акцент"><button type="button" class="text-button" data-auto-color="accent_color">Авто</button></div>
+        <div class="color-control"><label for="color_glow_color">Цвет свечения</label><input type="color" id="color_glow_color" data-appearance-color="glow_color" aria-label="Цвет свечения"><button type="button" class="text-button" data-auto-color="glow_color">Авто</button></div>
+    </div>
+    <details class="custom-colors"><summary>Точная настройка цветов</summary>
+      <p class="appearance-note">Нажми на образец цвета. «Авто» вернёт цвет выбранной гаммы.</p>
+      <div class="color-grid">
+        <div class="color-control"><label for="color_sidebar_color">Боковая панель</label><input type="color" id="color_sidebar_color" data-appearance-color="sidebar_color" aria-label="Боковая панель"><button type="button" class="text-button" data-auto-color="sidebar_color">Авто</button></div>
+        <div class="color-control"><label for="color_field_color">Поля ввода</label><input type="color" id="color_field_color" data-appearance-color="field_color" aria-label="Поля ввода"><button type="button" class="text-button" data-auto-color="field_color">Авто</button></div>
+        <div class="color-control"><label for="color_text_color">Основной текст</label><input type="color" id="color_text_color" data-appearance-color="text_color" aria-label="Основной текст"><button type="button" class="text-button" data-auto-color="text_color">Авто</button></div>
+        <div class="color-control"><label for="color_muted_color">Вторичный текст</label><input type="color" id="color_muted_color" data-appearance-color="muted_color" aria-label="Вторичный текст"><button type="button" class="text-button" data-auto-color="muted_color">Авто</button></div>
+        <div class="color-control"><label for="color_border_color">Границы</label><input type="color" id="color_border_color" data-appearance-color="border_color" aria-label="Границы"><button type="button" class="text-button" data-auto-color="border_color">Авто</button></div>
+      </div>
+    </details>
+    <fieldset class="effects-controls"><legend>Эффекты</legend>
+      <label class="effect-toggle"><input type="checkbox" id="glowEnabled" data-appearance-bool="glow_enabled">Неоновое свечение</label>
+      <div class="range-heading"><label for="neonIntensity">Сила свечения</label><output id="neonValue" for="neonIntensity">65%</output></div>
+      <input type="range" id="neonIntensity" min="0" max="100" step="5" data-appearance-range="neon_intensity">
+      <div class="range-heading"><label for="borderRadius">Скругление углов</label><output id="borderRadiusValue" for="borderRadius">16 px</output></div>
+      <input type="range" id="borderRadius" min="0" max="24" step="1" data-appearance-range="border_radius">
+      <div class="effects-toggles"><label class="effect-toggle"><input type="checkbox" id="themeGradients" data-appearance-bool="gradients">Градиенты</label><label class="effect-toggle"><input type="checkbox" id="themeBorders" data-appearance-bool="borders">Границы панелей</label></div>
+    </fieldset>
+    <p id="contrastWarning" class="appearance-note contrast-warning" role="status" hidden>Некоторые цвета текста сливаются с фоном. Измени цвет текста или нажми «Авто».</p>
+    <div class="appearance-preview" aria-label="Предпросмотр оформления"><div><span class="eyebrow">ТВОЙ МАЛЕНЬКИЙ ШАГ</span><strong>В своём ритме.</strong></div><span class="preview-check" aria-hidden="true">✓</span></div>
+    <p id="appearanceStatus" class="appearance-status" role="status" aria-live="polite">Оформление сохранено.</p>
+    <div class="appearance-actions"><button type="button" class="text-button" id="appearanceReset">Сбросить</button><button type="button" class="button subtle" id="appearanceCancel" hidden>Отменить</button><button type="submit" class="button primary" id="appearanceSave" disabled>Сохранить тему</button></div>
+  </form><p class="muted">Оформление сохраняется отдельно на каждом устройстве.</p></article>
 <article><h2>Копия данных</h2><button id="exportBackup">Сохранить резервную копию</button><p class="muted">Копия включает очередь изменений. Код подключения в неё не входит. Не удаляй приложение до синхронизации: Android удалит его локальные данные.</p></article></section>
 <section id="assistantPage" hidden><p class="eyebrow">ПЛАН, КОТОРЫЙ ЛЕГКО НАЧАТЬ</p><h1>С ChatGPT</h1><article><p>Ритм подготовит запрос. Вставь его в ChatGPT и верни ответ сюда. API-ключ не нужен. Сам ChatGPT требует подключения к интернету.</p><label>Твоя цель<textarea id="goal" rows="3" maxlength="2000" placeholder="Подготовиться к экзамену за неделю"></textarea></label><button id="copyPrompt" class="primary">Копировать запрос</button><button id="openChatGPT">Открыть ChatGPT</button><label>Ответ с планом<textarea id="planJson" rows="6" maxlength="60000" placeholder='{"tasks": [...]}'></textarea></label><button id="previewPlan">Проверить план</button><div id="planPreview" aria-live="polite"></div><button id="importPlan" class="primary" hidden>Добавить задачи</button><p class="muted">Твои задачи не отправляются в ChatGPT автоматически. Добавление произойдёт только после нажатия кнопки.</p></article></section>
 </main><button id="addTask" class="fab" aria-label="Добавить задачу">＋ <span>Новая задача</span></button>

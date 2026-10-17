@@ -125,7 +125,7 @@ async function load_state() {
     state = result;
     selected_date = state.selected_date;
     calendar_month ??= state.today.slice(0, 7);
-    const older_backend = state.version !== "0.3.6";
+    const older_backend = state.version !== "0.3.7";
     $("#connectionError").hidden = !older_backend;
     if (older_backend) $("#connectionError").textContent = "Работает другая версия Ритма. Заверши приложение через настройки или трей и запусти обновлённый Ritm.exe.";
     render();
@@ -351,7 +351,7 @@ function sync_appearance_controls() {
   $$('[data-appearance-bool]').forEach(input => { input.checked = appearance_draft[input.dataset.appearanceBool]; });
   $$('[data-appearance-color]').forEach(input => {
     const key = input.dataset.appearanceColor;
-    input.value = key === "accent_color" ? appearance_draft[key] : resolved.palette[window.RitmTheme.colors[key]];
+    input.value = key === "accent_color" ? appearance_draft[key] : resolved.palette[window.RitmTheme.colors[key]] || appearance_draft.accent_color;
   });
   $$('[data-auto-color]').forEach(button => {
     const key = button.dataset.autoColor;
@@ -753,22 +753,34 @@ function shift_month(delta) {
 $("#prevMonth").addEventListener("click", () => shift_month(-1));
 $("#nextMonth").addEventListener("click", () => shift_month(1));
 $("#calendarToday").addEventListener("click", () => { if (state) { calendar_month = state.today.slice(0, 7); render_calendar(); } });
+let escape_closes_dialog = false;
+let fullscreen_exit_pending = false;
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") hide_activity_tooltip();
   if (event.key === "Escape") {
-    if ($$("dialog").some(dialog => dialog.open)) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else if (state?.runtime?.platform === "nt" && !event.repeat) {
-      api("/app/exit-fullscreen", "POST", {}).catch(() => toast("Для выхода из полноэкранного режима нажми F11.", true));
-    }
+    if (!event.repeat) escape_closes_dialog = $$("dialog").some(dialog => dialog.open);
     return;
   }
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
   if (event.key.toLowerCase() === "n" && !typing && !event.ctrlKey && !event.altKey && !event.metaKey && !$$("dialog").some(dialog => dialog.open)) {
     event.preventDefault(); open_task();
   }
-});
+}, true);
+document.addEventListener("keyup", async event => {
+  if (event.key !== "Escape" || event.repeat) return;
+  const dismissed_dialog = escape_closes_dialog || $$("dialog").some(dialog => dialog.open);
+  escape_closes_dialog = false;
+  if (dismissed_dialog || fullscreen_exit_pending) return;
+  fullscreen_exit_pending = true;
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else if (state?.runtime?.platform === "nt") await api("/app/exit-fullscreen", "POST", {});
+  } catch (error) {
+    toast("Для выхода из полноэкранного режима нажми F11.", true);
+  } finally {
+    fullscreen_exit_pending = false;
+  }
+}, true);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !stopped) load_state(); });
 
 load_state();

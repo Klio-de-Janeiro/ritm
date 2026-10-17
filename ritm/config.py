@@ -17,7 +17,7 @@ PRIORITIES = ("low", "normal", "high")
 THEMES = ("neon", "midnight", "light")
 COLOR_SETTINGS = (
     "background_color", "panel_color", "sidebar_color", "field_color",
-    "text_color", "muted_color", "border_color",
+    "text_color", "muted_color", "border_color", "glow_color",
 )
 APPEARANCE_RANGES = {
     "neon_intensity": (0, 100), "palette_hue": (0, 360),

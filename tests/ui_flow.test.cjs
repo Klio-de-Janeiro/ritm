@@ -198,10 +198,21 @@ async function tick() { await Promise.resolve(); await Promise.resolve(); await 
   // Esc не меняет полноэкранное окно, пока открыт диалог.
   run("state.runtime.platform='nt'");
   const keydown=document.listeners.get('keydown')[0];
+  const keyup=document.listeners.get('keyup')[0];
   const before=requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length;
-  get('taskDialog').showModal();keydown({key:'Escape'});await tick();
+  get('taskDialog').showModal();keydown({key:'Escape'});get('taskDialog').close();
+  await keyup({key:'Escape'});
   assert.equal(requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length,before);
-  get('taskDialog').close();keydown({key:'Escape',repeat:false});await tick();
+  keydown({key:'Escape',repeat:false});await tick();
+  assert.equal(requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length,before);
+  await keyup({key:'Escape',repeat:false});
+  assert.equal(requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length,before+1);
+  keydown({key:'Escape',repeat:true});await keyup({key:'Escape',repeat:true});
+  assert.equal(requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length,before+1);
+  let htmlExits=0;
+  document.fullscreenElement={};document.exitFullscreen=async()=>{htmlExits++;document.fullscreenElement=null;};
+  keydown({key:'Escape'});await keyup({key:'Escape'});
+  assert.equal(htmlExits,1);
   assert.equal(requests.filter(r=>r.endpoint==='/app/exit-fullscreen').length,before+1);
   get('taskRecurrence').value='every_3_hours';get('taskReminder').checked=false;
   await get('taskRecurrence').fire('change');

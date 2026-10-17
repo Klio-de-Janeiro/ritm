@@ -83,3 +83,8 @@ assert.equal(engine.resolve({background_color: '#ffffff', text_color: '#ffffff'}
 assert.equal(engine.normalize({border_radius: true, palette_hue: 500}).border_radius, 16);
 assert.equal(engine.normalize({background_color: 'url(https://example.test)'}).background_color, null);
 console.log('Custom backgrounds, text, automatic colors, palette spectrum, effects and contrast warnings OK.');
+engine.apply({accent_color:'#35dcf7',glow_color:'#ff0000',neon_intensity:100});
+assert.equal(properties.get('--glow'),'rgba(255,0,0,0.420)');
+assert.equal(properties.get('--accent-soft'),'rgba(53,220,247,0.12)');
+engine.apply({accent_color:'#35dcf7',glow_color:null,neon_intensity:100});
+assert.equal(properties.get('--glow'),'rgba(53,220,247,0.420)');

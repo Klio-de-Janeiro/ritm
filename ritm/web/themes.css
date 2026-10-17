@@ -287,3 +287,5 @@ body { line-height:1.6; }
 .settings-panel > label input, .settings-panel > label textarea, #syncDetails input { width:100%; box-sizing:border-box; margin:8px 0; }
 .settings-panel > .button, #syncDetails .button { margin:6px 6px 6px 0; min-height:48px; }
 #syncDetails input { font-family:monospace; }
+
+.appearance-actions{position:sticky;bottom:12px;z-index:2;background:var(--panel);padding:12px 0;border-top:1px solid var(--line)}

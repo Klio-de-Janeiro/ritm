@@ -5,7 +5,7 @@
   const colors = Object.freeze({
     background_color: "--background", panel_color: "--panel",
     sidebar_color: "--sidebar", field_color: "--field", text_color: "--text",
-    muted_color: "--muted", border_color: "--line",
+    muted_color: "--muted", border_color: "--line", glow_color: "--glow-color",
   });
   const ranges = Object.freeze({
     neon_intensity: [0, 100], palette_hue: [0, 360],
@@ -178,13 +178,14 @@
     const foreground = contrast(accent, "#000000") >= contrast(accent, "#ffffff") ? "#000000" : "#ffffff";
     const glow = appearance.glow_enabled ? appearance.neon_intensity / 100 : 0;
     const channels = rgb(accent).join(",");
+    const glow_channels = rgb(appearance.glow_color || accent).join(",");
     const variables = {
       "--cyan": palette["--accent-text"], "--accent-foreground": foreground,
       "--accent-end": appearance.gradients ? mix(accent, foreground === "#ffffff" ? "#000000" : "#ffffff", 0.08) : accent,
       "--accent-soft": `rgba(${channels},0.12)`,
       "--accent-border": palette["--accent-text"] + "90",
-      "--glow": `rgba(${channels},${(glow * 0.42).toFixed(3)})`,
-      "--glow-soft": `rgba(${channels},${(glow * 0.10).toFixed(3)})`,
+      "--glow": `rgba(${glow_channels},${(glow * 0.42).toFixed(3)})`,
+      "--glow-soft": `rgba(${glow_channels},${(glow * 0.10).toFixed(3)})`,
       "--glow-blur": `${(glow * 24).toFixed(1)}px`,
       "--glow-small": `${(glow * 8).toFixed(1)}px`,
       "--surface-border": appearance.borders ? palette["--line"] : "transparent",

@@ -6,8 +6,8 @@ android {
         applicationId 'ru.klio.ritm'
         minSdk 26
         targetSdk 35
-        versionCode 8
-        versionName '0.3.6'
+        versionCode 9
+        versionName '0.3.7'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     // Постоянная локальная подпись позволяет ставить обновления поверх приложения.
@@ -30,6 +30,7 @@ android {
 }
 tasks.register('prepareRitmIcon') {
     inputs.file('../../Ritm.png')
+    inputs.file('../../ritm/web/theme.js')
     outputs.dir(layout.buildDirectory.dir('generated/ritmAssets'))
     outputs.dir(layout.buildDirectory.dir('generated/ritmRes'))
     doLast {
@@ -46,6 +47,10 @@ tasks.register('prepareRitmIcon') {
             g.drawImage(source, (int)((size-w)/2), (int)((size-h)/2), w, h, null); g.dispose()
             def destination = size == 192 ? layout.buildDirectory.file('generated/ritmRes/drawable-nodpi/ritm_icon.png').get().asFile : layout.buildDirectory.file('generated/ritmAssets/icon.png').get().asFile
             destination.parentFile.mkdirs(); javax.imageio.ImageIO.write(image, 'png', destination)
+        }
+        copy {
+            from '../../ritm/web/theme.js'
+            into layout.buildDirectory.dir('generated/ritmAssets')
         }
     }
 }

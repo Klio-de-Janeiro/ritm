@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request) {return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request) {
                 Uri uri=request.getUrl();String path=uri.getPath();
-                if(!"https".equals(uri.getScheme()) || !"ritm.invalid".equals(uri.getHost()) || !Arrays.asList("/index.html","/mobile.css","/mobile.js","/icon.png").contains(path)) return blocked();
+                if(!"https".equals(uri.getScheme()) || !"ritm.invalid".equals(uri.getHost()) || !Arrays.asList("/index.html","/mobile.css","/mobile.js","/theme.js","/appearance.js","/icon.png").contains(path)) return blocked();
                 try {
                     String type=path.endsWith(".html")?"text/html":path.endsWith(".css")?"text/css":path.endsWith(".js")?"application/javascript":"image/png";
                     Map<String,String> headers=new HashMap<>();
@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
                                     case "brightness": if(!(value instanceof Integer) || (int)value<2 || (int)value>20) throw new IllegalArgumentException("Некорректная яркость.");break;
                                     case "notifications": if(!(value instanceof Boolean)) throw new IllegalArgumentException("Некорректная настройка.");break;
                                     case "background": case "accent": if(value!=JSONObject.NULL && (!(value instanceof String) || !((String)value).matches("#[0-9a-fA-F]{6}"))) throw new IllegalArgumentException("Некорректный цвет.");break;
-                                    default: throw new IllegalArgumentException("Неизвестная настройка.");
+                                    default: Appearance.validate(key,value);
                                 }
                                 settings.put(key,value);
                             }

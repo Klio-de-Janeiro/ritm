@@ -13,25 +13,47 @@ function call(action,values={}) {
 }
 function toast(message) {clearTimeout(toastTimer);$("#toast").textContent=message;$("#toast").hidden=false;toastTimer=setTimeout(()=>$("#toast").hidden=true,5000);}
 function protect(action) {try {return action();} catch(error) {toast(error.message);}}
-function theme(settings) {
-  const hue=Number(settings.hue??190),bright=Number(settings.brightness??6),root=document.documentElement;
-  const background=settings.background||`hsl(${hue},50%,${bright}%)`,accent=settings.accent||`hsl(${hue},90%,72%)`;
-  root.style.setProperty("--hue",hue);root.style.setProperty("--bg",background);
-  root.style.setProperty("--card",`hsl(${hue},40%,${Math.min(bright+7,28)}%)`);
-  root.style.setProperty("--line",`hsl(${hue},28%,${bright+22}%)`);root.style.setProperty("--accent",accent);
-  const luminance=hex=>{const rgb=hex.match(/[a-f0-9]{2}/gi).map(c=>parseInt(c,16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4);return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];};
-  const light=settings.background&&luminance(settings.background)>.4;
-  root.style.setProperty("--ink",light?"#101a30":"#f1f4ff");root.style.setProperty("--muted",light?"#334661":"#acb9d5");
-  // Карточки следуют яркости гаммы; при светлом пользовательском фоне делаем их светлыми.
-  if(light) root.style.setProperty("--card",`hsl(${hue},25%,94%)`);
-  root.style.setProperty("--accent-ink",settings.accent&&luminance(settings.accent)<.25?"#ffffff":"#071523");
-}
 function rowHtml(row) {
   const task=state.tasks.find(t=>t.id===row.task_id),done=row.status==="done",future=row.date>today();
   return `<article class="task ${done?"done":""}"><button class="check" data-check="${esc(row.task_id)}" data-date="${esc(row.date)}" data-done="${done}" aria-label="${done?"Отменить выполнение":"Выполнить"}: ${esc(row.title)}" ${future?"disabled":""}>${done?"✓":"○"}</button><div><p class="title">${esc(row.title)}</p><div class="meta">${esc(row.time?(/^(hourly|every_\d+_hours)$/.test(task?.recurrence)?"С ":"")+row.time:"Без времени")} · ${esc(row.category)}${row.priority==="high"?" · Важное":""}<br>${esc(recurrence[task?.recurrence]||"")}${row.date!==day||page==="progress"?" · "+esc(row.date):""}</div>${row.notes?`<p class="note">${esc(row.notes)}</p>`:""}${task&&!task.archived_date?`<button class="edit" data-edit="${esc(task.id)}">Изменить</button>`:""}</div></article>`;
 }
+let activitySignature="";
+function renderActivity(history) {
+  const counts=new Map();
+  history.forEach(row=>{const date=(row.completed_at||row.date).slice(0,10);counts.set(date,(counts.get(date)||0)+1);});
+  const missed=new Map();
+  state.occurrences.forEach(row=>{
+    if(row.status!=="cancelled" && (row.status==="pending" || (row.completed_at||row.date).slice(0,10)>row.date)) missed.set(row.date,(missed.get(row.date)||0)+1);
+  });
+  const signature=JSON.stringify([today(),[...counts],[...missed]]);
+  const grid=$("#activityGrid"),scroll=$(".activity-scroll");
+  if(signature!==activitySignature) {
+    const previousScroll=scroll.scrollLeft,first=!activitySignature;
+    const start=new Date(today()+"T12:00:00");start.setDate(start.getDate()-90);
+    const padding=(start.getDay()+6)%7,cells=[],months=[];
+    for(let i=0;i<padding;i++) cells.push('<span class="activity-pad" aria-hidden="true"></span>');
+    for(let offset=0;offset<91;offset++) {
+      const date=new Date(start);date.setDate(date.getDate()+offset);
+      const value=dayString(date),count=counts.get(value)||0,unfinished=missed.get(value)||0;
+      const label=date.toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})+`: выполнено ${count}, не выполнено ${unfinished}`;
+      cells.push(`<button type="button" data-review-day="${value}" data-level="${Math.min(3,count)}" aria-label="${esc(label)}" aria-pressed="${value===reviewDay}" title="${esc(label)}"></button>`);
+    }
+    const trailing=(7-cells.length%7)%7;
+    for(let i=0;i<trailing;i++) cells.push('<span class="activity-pad" aria-hidden="true"></span>');
+    let previousMonth=-1;
+    for(let week=0;week<cells.length/7;week++) {
+      const date=new Date(start);date.setDate(date.getDate()+Math.max(0,week*7-padding));
+      const show=date.getMonth()!==previousMonth;previousMonth=date.getMonth();
+      months.push(`<span>${show?esc(date.toLocaleDateString("ru-RU",{month:"short"})):""}</span>`);
+    }
+    grid.innerHTML=cells.join("");$("#activityMonths").innerHTML=months.join("");
+    scroll.scrollLeft=first?scroll.scrollWidth:previousScroll;
+    activitySignature=signature;
+  }
+  grid.querySelectorAll('button').forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.reviewDay===reviewDay)));
+}
 function render() {
-  const s=state.settings;theme(s);
+  const s=state.settings;renderAppearance();
   $("#syncBadge").textContent=state.pending_count?`В очереди: ${state.pending_count}`:state.connected?"Синхронизация":"Офлайн";
   const date=new Date(day+"T12:00:00"),label=date.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"});
   $("#dayLabel").textContent=label[0].toUpperCase()+label.slice(1);$("#selectedDay").value=day;
@@ -46,8 +68,7 @@ function render() {
   const missed=state.occurrences.filter(row=>row.status==="pending"&&row.date<today()).sort((a,b)=>b.date.localeCompare(a.date));
   $("#unfinishedList").innerHTML=missed.length?missed.map(rowHtml).join(""):'<p class="muted">Пропущенных дел пока нет.</p>';
   $("#reviewDate").max=today();$("#reviewDate").value=reviewDay;
-  const cells=[];for(let offset=90;offset>=0;offset--){const d=new Date(today()+"T12:00:00");d.setDate(d.getDate()-offset);const value=dayString(d),count=history.filter(row=>(row.completed_at||row.date).slice(0,10)===value).length;cells.push(`<button data-review-day="${value}" data-level="${Math.min(3,count)}" aria-label="${value}: выполнено ${count}" title="${value}: выполнено ${count}"></button>`);}
-  $("#activityGrid").innerHTML=cells.join("");renderDayReview();
+  renderActivity(history);renderDayReview();
   $("#historyList").innerHTML=history.length?history.slice(0,200).map(rowHtml).join(""):'<div class="empty">Отметь первую задачу. Каждый выполненный шаг приносит 10 очков.</div>';
   $("#syncStatus").textContent=(state.connected?"Подключение: "+state.address:"Подключение не настроено.")+ (state.last_sync?"\nПоследний обмен: "+new Date(state.last_sync).toLocaleString("ru-RU"):"")+ (state.sync_error?"\n"+state.sync_error:"");
   $("#syncStatus").style.whiteSpace="pre-line";
@@ -56,16 +77,13 @@ function render() {
   if(document.activeElement!==$("#serverAddress")&&!$("#serverAddress").value) $("#serverAddress").value=state.address;
   $("#notifications").checked=s.notifications!==false;
   $("#permissionStatus").textContent=state.notification_permission?"Уведомления разрешены системой.":"Уведомления запрещены системой. Нажми кнопку выше.";
-  if(document.activeElement!==$("#themeHue")) $("#themeHue").value=s.hue??190;
-  if(document.activeElement!==$("#themeBrightness")) $("#themeBrightness").value=s.brightness??6;
-  $("#backgroundColor").value=s.background||"#080f26";$("#accentColor").value=s.accent||"#35dcf7";
   $("#conflicts").innerHTML=state.conflicts.map((item,index)=>`<div class="conflict"><h3>Нужно выбрать правку</h3><p>${esc(item.reason)}</p><p class="muted">Правка телефона сохранена ниже. На ноутбуке уже есть другая версия.</p><pre>${esc(JSON.stringify(item.operation.values||{date:item.operation.date,completed:item.operation.completed,kind:item.operation.kind},null,2))}</pre><button data-resolve="${index}" data-phone="false">Оставить версию ноутбука</button><button data-resolve="${index}" data-phone="true">Повторить правку телефона</button><button data-copy-conflict="${index}">Копировать правку</button></div>`).join("");
 }
 function refresh(force=false) {
   if(today()!==lastToday) {if(day===lastToday) day=today();lastToday=today();}
   protect(()=>{const latest=call("state",{date:day}),next=JSON.stringify(latest);state=latest;if(force||next!==signature){signature=next;render();}});
 }
-function selectPage(value) {page=value;for(const name of ["today","progress","settings","assistant"]) $("#"+name+"Page").hidden=name!==value;$$('nav button').forEach(b=>b.classList.toggle("active",b.dataset.page===value));$("#addTask").hidden=value!=="today";window.scrollTo(0,0);refresh();}
+function selectPage(value) {page=value;for(const name of ["today","progress","settings","assistant"]) $("#"+name+"Page").hidden=name!==value;$$('nav button').forEach(b=>b.classList.toggle("active",b.dataset.page===value));$("#addTask").hidden=value!=="today";window.scrollTo(0,0);refresh();if(value==="progress") $(".activity-scroll").scrollLeft=$(".activity-scroll").scrollWidth;}
 function editTask(id=null) {
   editing=id;const task=id?state.tasks.find(t=>t.id===id):{};
   $("#editorTitle").textContent=id?"Изменить задачу":"Новая задача";
@@ -79,14 +97,13 @@ function editTask(id=null) {
 document.addEventListener("click",event=>{
   const button=event.target.closest("button");if(!button)return;
   protect(()=>{
-    if(button.dataset.reviewDay){reviewDay=button.dataset.reviewDay;$("#reviewDate").value=reviewDay;renderDayReview();$("#dayReview").scrollIntoView({behavior:"smooth",block:"center"});}
+    if(button.dataset.reviewDay){reviewDay=button.dataset.reviewDay;$("#reviewDate").value=reviewDay;renderActivity(state.occurrences.filter(row=>row.status==="done"));renderDayReview();$("#dayReview").scrollIntoView({behavior:"smooth",block:"center"});}
     if(button.dataset.page) selectPage(button.dataset.page);
     if(button.dataset.filter) {filter=button.dataset.filter;$$('[data-filter]').forEach(b=>b.classList.toggle("active",b===button));render();}
     if(button.dataset.edit) editTask(button.dataset.edit);
     if(button.dataset.check) {call("mutate",{command:{kind:"complete",task_id:button.dataset.check,date:button.dataset.date,completed:button.dataset.done!=="true"}});refresh();toast(button.dataset.done!=="true"?"+10 очков. Шаг сделан!":"Выполнение отменено.");}
     if(button.dataset.resolve!==undefined) {call("resolve",{index:Number(button.dataset.resolve),keepPhone:button.dataset.phone==="true"});refresh();}
     if(button.dataset.copyConflict!==undefined) {call("copy",{text:JSON.stringify(state.conflicts[Number(button.dataset.copyConflict)],null,2)});toast("Правка скопирована.");}
-    if(button.dataset.hue) settings({hue:Number(button.dataset.hue),background:null,accent:null});
   });
 });
 $("#addTask").onclick=()=>protect(()=>editTask());$("#closeEditor").onclick=()=>$("#taskDialog").close();
@@ -105,10 +122,8 @@ $("#disconnect").onclick=()=>protect(()=>{call("disconnect");refresh();toast("О
 function settings(values){call("settings",{values});refresh();}
 $("#notifications").onchange=e=>protect(()=>settings({notifications:e.target.checked}));
 $("#notificationPermission").onclick=()=>protect(()=>call("permission"));
-$("#themeHue").onchange=e=>protect(()=>settings({hue:Number(e.target.value),background:null,accent:null}));
-$("#themeBrightness").onchange=e=>protect(()=>settings({brightness:Number(e.target.value),background:null}));
-$("#backgroundColor").onchange=e=>protect(()=>settings({background:e.target.value}));$("#accentColor").onchange=e=>protect(()=>settings({accent:e.target.value}));
-$("#resetColors").onclick=()=>protect(()=>settings({background:null,accent:null}));$("#exportBackup").onclick=()=>protect(()=>call("export"));
+$("#exportBackup").onclick=()=>protect(()=>call("export"));
+setupAppearance();
 $("#copyPrompt").onclick=()=>protect(()=>{call("copy",{text:`Составь реалистичный план: ${$("#goal").value||"Помоги спланировать день"}. Сегодня ${today()}. Верни только JSON {"tasks":[...]}, максимум 30 задач. Поля каждой задачи: title (до 200 символов), notes (до 2000), category (Работа/Учёба/Здоровье/Личное), priority (low/normal/high), recurrence (once/hourly/every_3_hours/every_5_hours/every_8_hours/every_12_hours/daily/every_3_days/weekdays/weekly/monthly/three_times_daily/event), start_date (YYYY-MM-DD, не раньше сегодня), time (HH:MM или null), reminder (boolean, true только с time). Для часовых повторов обязательно time и reminder=true. reminder_end_date (YYYY-MM-DD или null, последний день уведомлений включительно), event_date (YYYY-MM-DD, обязательно для event), escalation_days (1–365, по умолчанию 3). Для event и three_times_daily reminder=true и time=09:00. event — ежедневно в 09:00, за escalation_days до event_date и в день события в 09:00, 15:00, 21:00. Разовые напоминания действуют до конца start_date по умолчанию. Никаких других полей или команд.`});toast("Запрос скопирован. Вставь его в ChatGPT.");});
 $("#openChatGPT").onclick=()=>protect(()=>call("chatgpt"));
 $("#planJson").oninput=()=>{plan=null;$("#importPlan").hidden=true;$("#planPreview").textContent="";};
@@ -125,7 +140,7 @@ function updateReminderFields() {
   if(fixed){$("#taskTime").value="09:00";$("#taskReminder").checked=true;}
   $("#taskTime").required=$("#taskReminder").checked;
 }
-$("#reviewDate").onchange=()=>{if($("#reviewDate").value){reviewDay=$("#reviewDate").value;renderDayReview();}};
+$("#reviewDate").onchange=()=>{if($("#reviewDate").value){reviewDay=$("#reviewDate").value;renderActivity(state.occurrences.filter(row=>row.status==="done"));renderDayReview();}};
 $("#taskDate").onchange=()=>{if($("#taskRecurrence").value==="once"&&(!$("#taskReminderEnd").value||$("#taskReminderEnd").value===editorDay))$("#taskReminderEnd").value=$("#taskDate").value;editorDay=$("#taskDate").value;};
 $("#taskRecurrence").onchange=()=>{if($("#taskRecurrence").value==="once"&&!$("#taskReminderEnd").value)$("#taskReminderEnd").value=$("#taskDate").value;if($("#taskRecurrence").value!=="once"&&$("#taskReminderEnd").value===$("#taskDate").value)$("#taskReminderEnd").value="";if(/^(hourly|every_\d+_hours)$/.test($("#taskRecurrence").value)){$("#taskReminder").checked=true;if(!$("#taskTime").value)$("#taskTime").value="09:00";}updateReminderFields();};
 $("#taskReminder").onchange=()=>{$("#taskTime").required=$("#taskReminder").checked;if($("#taskReminder").checked&&!$("#taskTime").value)$("#taskTime").value="09:00";};
