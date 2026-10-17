@@ -90,7 +90,7 @@ class SyncEngine:
             tasks = [normalized(row) for row in db.execute("SELECT * FROM tasks")]
             occurrences = [normalized(row) for row in db.execute(
                 "SELECT task_id,date,title,notes,category,priority,time,reminder,"
-                "status,completed_at FROM occurrences WHERE status!='cancelled'")]
+                "status,completed_at,dismissed_at FROM occurrences WHERE status!='cancelled'")]
         return {"protocol": 2, "server_id": self.server_id, "accepted": accepted,
                 "conflicts": conflicts, "tasks": tasks, "occurrences": occurrences,
                 "server_time": self.store.clock().isoformat()}
@@ -131,6 +131,21 @@ class SyncEngine:
             return
         if not current:
             raise ValidationError("На ноутбуке нет этой задачи.", 409)
+        if kind == "dismiss":
+            day = parse_day(op.get("date"))
+            row = db.execute("SELECT * FROM occurrences WHERE task_id=? AND date=?", (task_id, day.isoformat())).fetchone()
+            if not row:
+                raise ValidationError("Запись не найдена.", 409)
+            desired = as_bool(op.get("dismissed"), "dismissed")
+            before = op.get("before", {})
+            if not isinstance(before, dict) or before.get("status") != row["status"] or before.get("dismissed_at") != row["dismissed_at"]:
+                raise ValidationError("Дело изменилось на ноутбуке.", 409)
+            try:
+                when = datetime.fromisoformat(op["dismissed_at"]) if desired else None
+            except (KeyError, ValueError, TypeError) as error:
+                raise ValidationError("Некорректное время зачёркивания.") from error
+            self.store._dismiss(db, row["id"], desired, when)
+            return
         if kind == "complete":
             day = parse_day(op.get("date"))
             if day > today or day < today - timedelta(days=3650):
@@ -141,6 +156,8 @@ class SyncEngine:
                                     (task_id, day.isoformat())).fetchone()
             if not occurrence or occurrence["status"] == "cancelled":
                 raise ValidationError("Запись отменена или больше не входит в расписание.", 409)
+            if occurrence["dismissed_at"]:
+                raise ValidationError("Сначала верни зачёркнутое дело в работу.", 409)
             desired = "done" if completed else "pending"
             if occurrence["status"] == desired:
                 return

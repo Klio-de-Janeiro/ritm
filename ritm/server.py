@@ -24,7 +24,7 @@ WEB_FILES = (
 MAX_BODY = 65536
 TASK_PATH = re.compile(r"/api/v1/tasks/([a-f0-9-]{36})$")
 OCCURRENCE_PATH = re.compile(
-    r"/api/v1/occurrences/([1-9][0-9]*)/(complete|snooze)$"
+    r"/api/v1/occurrences/([1-9][0-9]*)/(complete|snooze|dismiss)$"
 )
 
 
@@ -287,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValidationError("Некорректный идентификатор.")
             if occurrence_match[2] == "complete":
                 result = store.complete(occurrence_id, body.get("completed", True))
+            elif occurrence_match[2] == "dismiss":
+                result = store.dismiss(occurrence_id, body.get("dismissed", True))
             else:
                 result = store.snooze(occurrence_id, body.get("minutes", 10))
             return self._send(200, result)

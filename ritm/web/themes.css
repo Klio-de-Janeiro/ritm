@@ -289,3 +289,6 @@ body { line-height:1.6; }
 #syncDetails input { font-family:monospace; }
 
 .appearance-actions{position:sticky;bottom:12px;z-index:2;background:var(--panel);padding:12px 0;border-top:1px solid var(--line)}
+
+.is-dismissed .task-title,.is-dismissed>span,.calendar-event.is-dismissed{color:var(--danger);text-decoration:line-through;text-decoration-thickness:2px}
+.grace-label{color:var(--warning);font-size:13px}.dismiss-task{color:var(--danger)}

@@ -67,3 +67,5 @@ input,select,textarea{background:var(--field);color:var(--text)}
 .appearance-actions{position:sticky;bottom:82px;z-index:2;display:flex;flex-wrap:wrap;gap:8px;background:var(--card);padding:12px 0;margin-top:12px;border-top:1px solid var(--line)}
 .appearance-actions button{font-size:14px;padding:10px;min-width:0;flex:1}.appearance-actions .primary{flex:2}
 .contrast-warning{color:var(--warning)}
+
+.task.is-dismissed .title,#dayReview li.is-dismissed>span{color:var(--danger);text-decoration:line-through;text-decoration-thickness:2px}.grace-label{color:var(--warning)}.dismiss-task{color:var(--danger)}

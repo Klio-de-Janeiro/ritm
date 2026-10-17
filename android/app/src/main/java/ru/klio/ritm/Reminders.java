@@ -35,13 +35,26 @@ public final class Reminders {
                 JSONArray rows=view.getJSONArray("occurrences");boolean changed=false;
                 for(int i=0;i<rows.length();i++) {
                     JSONObject row=rows.getJSONObject(i),task=tasks.get(row.getString("task_id"));
-                    if(task==null || !task.isNull("archived_date") || !row.getString("status").equals("pending") || !row.optBoolean("reminder") || row.isNull("time")) continue;
+                    if(task==null || !task.isNull("archived_date") || !row.getString("status").equals("pending") || !row.isNull("dismissed_at")) continue;
+                    long when;String key;
+                    boolean grace=!now.toLocalDateTime().isBefore(Deadline.at(task,row));
+                    if(grace) {
+                        LocalDateTime deadline=Deadline.at(task,row),slot=Deadline.slot(task,row,now.toLocalDateTime());
+                        for(int hour=1;hour<=2;hour++) {
+                            LocalDateTime candidate=deadline.plusHours(hour);
+                            if(candidate.isAfter(now.toLocalDateTime())) next=Math.min(next,candidate.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+                        }
+                        if(slot==null) continue;
+                        when=slot.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                        key=Model.key(row)+"|grace|"+slot.toString();
+                    } else {
+                    if(!row.optBoolean("reminder") || row.isNull("time")) continue;
                     if(!Model.remindersActive(task,today)) continue;
                     String day=row.getString("date");
                     if(task.getString("recurrence").equals("once") && !day.equals(task.getString("start_date"))) continue;
                     if(!day.equals(today.toString()) && !task.getString("recurrence").equals("once")) continue;
-                    long when=LocalDateTime.parse(day+"T"+row.getString("time")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-                    String key=Model.key(row)+"|"+row.getString("time");
+                    when=LocalDateTime.parse(day+"T"+row.getString("time")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                    key=Model.key(row)+"|"+row.getString("time");
                     String[] times=Model.dailyTimes(task,today);
                     if(times.length>0) {
                         LocalDateTime slot=null;
@@ -65,13 +78,14 @@ public final class Reminders {
                         when=slot.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                         key=Model.key(row)+"|"+slot.toString();
                     }
+                    }
                     if(delivered.has(key)) continue;
                     if(when>now.toInstant().toEpochMilli()) {next=Math.min(next,when);continue;}
                     if(!permitted(context)) continue;
                     Intent launch=new Intent(context,MainActivity.class);
                     PendingIntent open=PendingIntent.getActivity(context,0,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
                     Notification notification=new Notification.Builder(context,CHANNEL).setSmallIcon(R.drawable.notification)
-                        .setContentTitle(row.getString("title")).setContentText("Открой Ритм и отметь свой следующий шаг.")
+                        .setContentTitle(row.getString("title")).setContentText(grace?"Дополнительные два часа: выполни дело или зачеркни его после окончания продления.":"Открой Ритм и отметь свой следующий шаг.")
                         .setContentIntent(open).setAutoCancel(true).build();
                     manager.notify(Model.key(row).hashCode(),notification);
                     delivered.put(key,today.toString());changed=true;

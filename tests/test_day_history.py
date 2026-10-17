@@ -29,7 +29,8 @@ class DayHistoryTests(unittest.TestCase):
         self.now = self.now.replace(day=17, hour=0, minute=9)
         self.assertEqual(self.store.due_notifications(), [])
         state = self.store.state("2026-10-17")
-        self.assertEqual(state["tasks"], [])
+        self.assertTrue(state["tasks"][0]["in_grace"])
+        self.assertEqual(state["tasks"][0]["grace_until"], "2026-10-17T02:00:00+03:00")
         self.assertEqual([row["title"] for row in state["unfinished"]], ["Лекция по физике"])
         self.assertEqual(self.store.day_details("2026-10-16")["unfinished"][0]["title"], "Лекция по физике")
 

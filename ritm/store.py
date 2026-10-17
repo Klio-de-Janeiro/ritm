@@ -13,7 +13,7 @@ from .config import (
     APPEARANCE_RANGES, CATEGORIES, COLOR_SETTINGS, DEFAULT_SETTINGS, HOUR_INTERVALS,
     PRIORITIES, RECURRENCES, THEMES,
 )
-from .recurrence import notification_due
+from .recurrence import notification_due, grace_due, occurrence_state, deadline, missed_deadline
 
 
 SCHEMA = """
@@ -220,7 +220,7 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version > 2:
+            if version > 3:
                 raise RuntimeError("База создана более новой версией Ритма.")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(SCHEMA)
@@ -229,7 +229,11 @@ class Store:
                                      ("escalation_days", "INTEGER NOT NULL DEFAULT 3")):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
-            connection.execute("PRAGMA user_version = 2")
+            occurrence_columns = {row["name"] for row in connection.execute("PRAGMA table_info(occurrences)")}
+            for name in ("dismissed_at", "grace_notified_at"):
+                if name not in occurrence_columns:
+                    connection.execute(f"ALTER TABLE occurrences ADD COLUMN {name} TEXT")
+            connection.execute("PRAGMA user_version = 3")
             for key, value in DEFAULT_SETTINGS.items():
                 connection.execute(
                     "INSERT OR IGNORE INTO settings VALUES (?, ?)",
@@ -432,6 +436,8 @@ class Store:
             ).fetchone()
             if not row or row["status"] == "cancelled":
                 raise ValidationError("Запись задачи не найдена.", 404)
+            if row["dismissed_at"]:
+                raise ValidationError("Сначала верни зачёркнутое дело в работу.")
             if parse_day(row["date"]) > now.date():
                 raise ValidationError("Будущие задачи пока нельзя выполнять.")
             if row["status"] == ("done" if completed else "pending"):
@@ -456,6 +462,30 @@ class Store:
             )
         return {"completed": completed, "id": occurrence_id}
 
+    def _dismiss(self, connection, occurrence_id, dismissed, when=None):
+        as_bool(dismissed, "dismissed")
+        row = connection.execute("SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o "
+            "JOIN tasks t ON t.id=o.task_id WHERE o.id=?", (occurrence_id,)).fetchone()
+        if not row or row["status"] != "pending":
+            raise ValidationError("Можно зачеркнуть только невыполненное дело.", 409)
+        if bool(row["dismissed_at"]) == dismissed:
+            return {"id": occurrence_id, "dismissed_at": row["dismissed_at"]}
+        now = self.clock()
+        until = deadline(row) + timedelta(hours=2)
+        if dismissed and now.replace(tzinfo=None) < until:
+            raise ValidationError("Зачеркнуть дело можно после двух дополнительных часов.", 409)
+        moment = when or now
+        if dismissed and (moment.tzinfo is None or moment.replace(tzinfo=None) < until or moment > now + timedelta(days=1)):
+            raise ValidationError("Некорректное время зачёркивания.")
+        value = moment.isoformat() if dismissed else None
+        connection.execute("UPDATE occurrences SET dismissed_at=?,snooze_until=NULL WHERE id=?", (value, occurrence_id))
+        connection.execute("UPDATE notifications SET read=1 WHERE occurrence_id=?", (occurrence_id,))
+        return {"id": occurrence_id, "dismissed_at": value}
+
+    def dismiss(self, occurrence_id, dismissed=True):
+        with self.connection(write=True) as connection:
+            return self._dismiss(connection, occurrence_id, dismissed)
+
     def snooze(self, occurrence_id, minutes):
         """Отложить ожидающую задачу на заданное число минут."""
         if type(minutes) is not int or minutes not in (5, 10, 15, 30, 60):
@@ -463,7 +493,7 @@ class Store:
         until = self.clock() + timedelta(minutes=minutes)
         with self.connection(write=True) as connection:
             row = connection.execute(
-                "SELECT * FROM occurrences WHERE id=? AND status='pending'",
+                "SELECT * FROM occurrences WHERE id=? AND status='pending' AND dismissed_at IS NULL",
                 (occurrence_id,),
             ).fetchone()
             if not row or row["date"] > self.clock().date().isoformat():
@@ -530,6 +560,7 @@ class Store:
         self.refresh()
         now = self.clock()
         today = now.date().isoformat()
+        yesterday = (now.date() - timedelta(days=1)).isoformat()
         result = []
         if not self.settings()["notifications"]:
             return result
@@ -538,25 +569,28 @@ class Store:
                 """SELECT o.*, t.recurrence, t.start_date, t.reminder_end_date,
                 t.event_date, t.escalation_days FROM occurrences o
                 JOIN tasks t ON t.id=o.task_id
-                WHERE o.reminder=1 AND o.status='pending'
+                WHERE o.status='pending' AND o.dismissed_at IS NULL
                 AND t.archived_date IS NULL
                 AND o.date<=?
-                AND (o.date=? OR t.recurrence='once'
-                     OR o.snooze_until IS NOT NULL)
-                ORDER BY o.date, o.time""", (today, today),
+                AND (o.date>=? OR (t.recurrence='once' AND COALESCE(t.reminder_end_date,o.date)>=?))
+                ORDER BY o.date, o.time""", (today, yesterday, yesterday),
             ).fetchall()
             for row in rows:
-                if not notification_due(row, now):
+                grace = grace_due(row, now)
+                if not grace and (not row["reminder"] or not row["time"] or not notification_due(row, now)):
                     continue
                 title = row["title"]
                 body = "Время сделать шаг вперёд. Открой Ритм и отметь задачу."
+                if grace:
+                    body = "Срок продлён на два часа. Ещё можно выполнить дело или зачеркнуть его после окончания продления."
                 cursor = connection.execute(
                     "INSERT INTO notifications "
                     "(occurrence_id, title, body, created_at) VALUES (?,?,?,?)",
                     (row["id"], title, body, now.isoformat()),
                 )
+                column = "grace_notified_at" if grace else "notified_at"
                 connection.execute(
-                    "UPDATE occurrences SET notified_at=?,snooze_until=NULL WHERE id=?",
+                    f"UPDATE occurrences SET {column}=?,snooze_until=NULL WHERE id=?",
                     (now.isoformat(), row["id"]),
                 )
                 result.append({"id": cursor.lastrowid, "title": title,
@@ -636,13 +670,14 @@ class Store:
                 "SELECT substr(completed_at,1,10) AS date, COUNT(*) AS done "
                 "FROM occurrences WHERE status='done' GROUP BY 1"
             ).fetchall()
-            missed_counts = connection.execute(
-                "SELECT date, COUNT(*) AS missed FROM occurrences WHERE status!='cancelled' "
-                "AND (status='pending' OR substr(completed_at,1,10)>date) GROUP BY date"
+            missed_rows = connection.execute(
+                "SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o "
+                "JOIN tasks t ON t.id=o.task_id WHERE o.status!='cancelled' "
+                "AND (o.status='pending' OR substr(o.completed_at,1,10)>o.date)"
             ).fetchall()
             notifications = connection.execute(
                 "SELECT n.*, CASE WHEN t.archived_date IS NOT NULL "
-                "AND o.status='pending' THEN 'cancelled' ELSE o.status "
+                "AND o.status='pending' THEN 'cancelled' WHEN o.dismissed_at IS NOT NULL THEN 'dismissed' ELSE o.status "
                 "END AS task_status FROM notifications n "
                 "LEFT JOIN occurrences o ON o.id=n.occurrence_id "
                 "LEFT JOIN tasks t ON t.id=o.task_id "
@@ -653,7 +688,10 @@ class Store:
             ).fetchone()
         by_day = {row["date"]: dict(row) for row in counts}
         completed_days = {row["date"]: row["done"] for row in completed_counts}
-        missed_days = {row["date"]: row["missed"] for row in missed_counts}
+        missed_days = {}
+        for row in missed_rows:
+            if missed_deadline(row):
+                missed_days[row["date"]] = missed_days.get(row["date"], 0) + 1
         done_dates = {parse_day(key) for key in completed_days
                       if parse_day(key) <= today}
         current = today if today in done_dates else today - timedelta(days=1)
@@ -680,8 +718,10 @@ class Store:
         return {
             "today": today.isoformat(), "selected_date": selected,
             "server_time": self.clock().isoformat(),
-            "tasks": [dict(row, reminder=bool(row["reminder"])) for row in rows],
-            "unfinished": [dict(row, reminder=bool(row["reminder"])) for row in unfinished],
+            "tasks": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in rows] + (
+                [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished
+                 if occurrence_state(row, self.clock())["in_grace"]] if day == today else []),
+            "unfinished": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished],
             "week": week, "activity": activity,
             "summary": {"done": total_done, "xp": total_done * 10,
                         "level": total_done // 10 + 1,
@@ -703,19 +743,18 @@ class Store:
         self.refresh()
         with self.connection() as connection:
             done = connection.execute(
-                "SELECT id,task_id,date,title,category,status,completed_at FROM occurrences "
+                "SELECT id,task_id,date,title,category,status,completed_at,dismissed_at FROM occurrences "
                 "WHERE status='done' AND substr(completed_at,1,10)=? ORDER BY completed_at,id",
                 (selected,),
             ).fetchall()
             unfinished = connection.execute(
-                "SELECT id,task_id,date,title,category,status,completed_at FROM occurrences "
-                "WHERE date=? AND status!='cancelled' "
-                "AND (status='pending' OR substr(completed_at,1,10)>?) ORDER BY time IS NULL,time,id",
-                (selected, selected),
+                "SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o JOIN tasks t ON t.id=o.task_id "
+                "WHERE o.date=? AND o.status!='cancelled' ORDER BY o.time IS NULL,o.time,o.id",
+                (selected,),
             ).fetchall()
         return {"date": selected, "is_past": day < today,
                 "done": [dict(row) for row in done],
-                "unfinished": [dict(row) for row in unfinished]}
+                "unfinished": [dict(row) for row in unfinished if missed_deadline(row)]}
 
     def calendar(self, month):
         """Собрать шесть календарных недель с сохранёнными задачами."""
@@ -734,7 +773,7 @@ class Store:
                 if day >= today:
                     self._materialize(connection, day)
             rows = connection.execute(
-                "SELECT id,date,title,category,time,status FROM occurrences "
+                "SELECT id,date,title,category,time,status,dismissed_at FROM occurrences "
                 "WHERE date>=? AND date<=? AND status!='cancelled' "
                 "ORDER BY date,time IS NULL,time,id",
                 (start.isoformat(), end.isoformat()),

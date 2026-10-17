@@ -14,8 +14,8 @@ function call(action,values={}) {
 function toast(message) {clearTimeout(toastTimer);$("#toast").textContent=message;$("#toast").hidden=false;toastTimer=setTimeout(()=>$("#toast").hidden=true,5000);}
 function protect(action) {try {return action();} catch(error) {toast(error.message);}}
 function rowHtml(row) {
-  const task=state.tasks.find(t=>t.id===row.task_id),done=row.status==="done",future=row.date>today();
-  return `<article class="task ${done?"done":""}"><button class="check" data-check="${esc(row.task_id)}" data-date="${esc(row.date)}" data-done="${done}" aria-label="${done?"Отменить выполнение":"Выполнить"}: ${esc(row.title)}" ${future?"disabled":""}>${done?"✓":"○"}</button><div><p class="title">${esc(row.title)}</p><div class="meta">${esc(row.time?(/^(hourly|every_\d+_hours)$/.test(task?.recurrence)?"С ":"")+row.time:"Без времени")} · ${esc(row.category)}${row.priority==="high"?" · Важное":""}<br>${esc(recurrence[task?.recurrence]||"")}${row.date!==day||page==="progress"?" · "+esc(row.date):""}</div>${row.notes?`<p class="note">${esc(row.notes)}</p>`:""}${task&&!task.archived_date?`<button class="edit" data-edit="${esc(task.id)}">Изменить</button>`:""}</div></article>`;
+  const task=state.tasks.find(t=>t.id===row.task_id),done=row.status==="done",future=row.date>today(),dismissed=!!row.dismissed_at;
+  return `<article class="task ${done?"done":""} ${dismissed?"is-dismissed":""}"><button class="check" data-check="${esc(row.task_id)}" data-date="${esc(row.date)}" data-done="${done}" aria-label="${done?"Отменить выполнение":"Выполнить"}: ${esc(row.title)}" ${future||dismissed?"disabled":""}>${done?"✓":"○"}</button><div><p class="title">${esc(row.title)}</p><div class="meta">${esc(row.time?(/^(hourly|every_\d+_hours)$/.test(task?.recurrence)?"С ":"")+row.time:"Без времени")} · ${esc(row.category)}${row.priority==="high"?" · Важное":""}<br>${row.in_grace?`<span class="grace-label">Продлено до ${new Date(row.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span> · `:""}${dismissed?"Зачёркнуто · без XP · ":""}${esc(recurrence[task?.recurrence]||"")}${row.date!==day||page==="progress"?" · "+esc(row.date):""}</div>${row.notes?`<p class="note">${esc(row.notes)}</p>`:""}${!done&&(dismissed||row.can_dismiss)?`<button class="edit dismiss-task" data-dismiss="${esc(row.task_id)}" data-date="${esc(row.date)}" data-dismissed="${!dismissed}">${dismissed?"Вернуть":"Зачеркнуть"}</button>`:""}${task&&!task.archived_date?`<button class="edit" data-edit="${esc(task.id)}">Изменить</button>`:""}</div></article>`;
 }
 let activitySignature="";
 function renderActivity(history) {
@@ -23,7 +23,7 @@ function renderActivity(history) {
   history.forEach(row=>{const date=(row.completed_at||row.date).slice(0,10);counts.set(date,(counts.get(date)||0)+1);});
   const missed=new Map();
   state.occurrences.forEach(row=>{
-    if(row.status!=="cancelled" && (row.status==="pending" || (row.completed_at||row.date).slice(0,10)>row.date)) missed.set(row.date,(missed.get(row.date)||0)+1);
+    if(row.status!=="cancelled" && (row.status==="pending" || completedLate(row))) missed.set(row.date,(missed.get(row.date)||0)+1);
   });
   const signature=JSON.stringify([today(),[...counts],[...missed]]);
   const grid=$("#activityGrid"),scroll=$(".activity-scroll");
@@ -57,7 +57,7 @@ function render() {
   $("#syncBadge").textContent=state.pending_count?`В очереди: ${state.pending_count}`:state.connected?"Синхронизация":"Офлайн";
   const date=new Date(day+"T12:00:00"),label=date.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"});
   $("#dayLabel").textContent=label[0].toUpperCase()+label.slice(1);$("#selectedDay").value=day;
-  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&row.date===day);
+  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&(row.date===day||(day===today()&&row.in_grace)));
   const done=rows.filter(row=>row.status==="done").length;
   $("#dailyCount").textContent=`${done} / ${rows.length}`;$("#dailyProgress").max=Math.max(1,rows.length);$("#dailyProgress").value=done;
   const visible=rows.filter(row=>filter==="all"||row.status===filter).sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
@@ -101,6 +101,7 @@ document.addEventListener("click",event=>{
     if(button.dataset.page) selectPage(button.dataset.page);
     if(button.dataset.filter) {filter=button.dataset.filter;$$('[data-filter]').forEach(b=>b.classList.toggle("active",b===button));render();}
     if(button.dataset.edit) editTask(button.dataset.edit);
+    if(button.dataset.dismiss) {call("mutate",{command:{kind:"dismiss",task_id:button.dataset.dismiss,date:button.dataset.date,dismissed:button.dataset.dismissed==="true"}});refresh(true);}
     if(button.dataset.check) {call("mutate",{command:{kind:"complete",task_id:button.dataset.check,date:button.dataset.date,completed:button.dataset.done!=="true"}});refresh();toast(button.dataset.done!=="true"?"+10 очков. Шаг сделан!":"Выполнение отменено.");}
     if(button.dataset.resolve!==undefined) {call("resolve",{index:Number(button.dataset.resolve),keepPhone:button.dataset.phone==="true"});refresh();}
     if(button.dataset.copyConflict!==undefined) {call("copy",{text:JSON.stringify(state.conflicts[Number(button.dataset.copyConflict)],null,2)});toast("Правка скопирована.");}
@@ -145,11 +146,12 @@ $("#taskDate").onchange=()=>{if($("#taskRecurrence").value==="once"&&(!$("#taskR
 $("#taskRecurrence").onchange=()=>{if($("#taskRecurrence").value==="once"&&!$("#taskReminderEnd").value)$("#taskReminderEnd").value=$("#taskDate").value;if($("#taskRecurrence").value!=="once"&&$("#taskReminderEnd").value===$("#taskDate").value)$("#taskReminderEnd").value="";if(/^(hourly|every_\d+_hours)$/.test($("#taskRecurrence").value)){$("#taskReminder").checked=true;if(!$("#taskTime").value)$("#taskTime").value="09:00";}updateReminderFields();};
 $("#taskReminder").onchange=()=>{$("#taskTime").required=$("#taskReminder").checked;if($("#taskReminder").checked&&!$("#taskTime").value)$("#taskTime").value="09:00";};
 
+function completedLate(row){return !!row.completed_at && (row.grace_until?new Date(row.completed_at)>new Date(row.grace_until):row.completed_at.slice(0,10)>row.date);}
 function renderDayReview(){
   if(!state)return;
   const actual=row=>(row.completed_at||"").slice(0,10);
   const done=state.occurrences.filter(row=>row.status==="done"&&actual(row)===reviewDay);
-  const missed=state.occurrences.filter(row=>row.date===reviewDay&&row.status!=="cancelled"&&(row.status==="pending"||actual(row)>reviewDay));
-  const list=rows=>rows.length?"<ul>"+rows.map(row=>`<li>${esc(row.title)}${row.completed_at?`<small>${row.status==="done"&&actual(row)>reviewDay?"Выполнено позже: ":""}${esc(row.completed_at.slice(0,10))} · ${esc(row.completed_at.slice(11,16))}</small>`:""}</li>`).join("")+"</ul>":'<p class="muted">Дел нет.</p>';
+  const missed=state.occurrences.filter(row=>row.date===reviewDay&&row.status!=="cancelled"&&(row.status==="pending"||completedLate(row)));
+  const list=rows=>rows.length?"<ul>"+rows.map(row=>`<li class="${row.dismissed_at?"is-dismissed":""}"><span>${esc(row.title)}</span>${row.completed_at?`<small>${row.status==="done"&&completedLate(row)?"Выполнено позже: ":""}${esc(row.completed_at.slice(0,10))} · ${esc(row.completed_at.slice(11,16))}</small>`:""}</li>`).join("")+"</ul>":'<p class="muted">Дел нет.</p>';
   $("#dayReview").innerHTML=`<h3>Выполнено за день · ${done.length}</h3>${list(done)}<h3>${reviewDay<today()?"Не выполнено к концу дня":"Ещё не выполнено"} · ${missed.length}</h3>${list(missed)}`;
 }

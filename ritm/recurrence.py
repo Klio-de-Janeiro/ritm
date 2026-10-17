@@ -5,6 +5,54 @@ from datetime import datetime, timedelta
 from .config import HOUR_INTERVALS
 
 
+def deadline(row):
+    """Время сигнала не является дедлайном: срок заканчивается в конце дня."""
+    day = row["date"]
+    if row["recurrence"] == "once" and day == row["start_date"]:
+        day = row["reminder_end_date"] or day
+    return datetime.fromisoformat(day) + timedelta(days=1)
+
+
+def grace_slot(row, now):
+    local = now.replace(tzinfo=None)
+    end = deadline(row)
+    slots = [end + timedelta(hours=1), end + timedelta(hours=2)]
+    # Короткое окно доставки последнего сигнала учитывает задержку фонового цикла.
+    if local < slots[0] or local >= slots[1] + timedelta(minutes=5):
+        return None
+    return slots[1] if local >= slots[1] else slots[0]
+
+
+def grace_due(row, now):
+    if row["dismissed_at"]:
+        return False
+    if row["recurrence"] == "once" and row["date"] != row["start_date"]:
+        return False
+    if row["reminder_end_date"] and row["date"] > row["reminder_end_date"]:
+        return False
+    slot = grace_slot(row, now)
+    delivered = row["grace_notified_at"]
+    return slot is not None and (not delivered or slot > datetime.fromisoformat(delivered).replace(tzinfo=None))
+
+
+def occurrence_state(row, now):
+    result = dict(row)
+    end = deadline(row)
+    until = end + timedelta(hours=2)
+    local = now.replace(tzinfo=None)
+    result.update(deadline_at=end.replace(tzinfo=now.tzinfo).isoformat(),
+                  grace_until=until.replace(tzinfo=now.tzinfo).isoformat(),
+                  in_grace=row["status"] == "pending" and not row["dismissed_at"] and end <= local < until,
+                  can_dismiss=row["status"] == "pending" and not row["dismissed_at"] and local >= until)
+    return result
+
+
+def missed_deadline(row):
+    if row["status"] == "pending":
+        return True
+    return row["status"] == "done" and datetime.fromisoformat(row["completed_at"]).replace(tzinfo=None) > deadline(row) + timedelta(hours=2)
+
+
 def daily_times(task, day):
     """Фиксированные часы с учащением за выбранное число дней до события."""
     if task["recurrence"] == "three_times_daily":

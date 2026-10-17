@@ -88,6 +88,10 @@ context.window=context;
 context.RitmNative={call(encoded){
   const request=JSON.parse(encoded);
   if(request.action==='settings') Object.assign(data.settings,request.values);
+  if(request.action==='mutate'&&request.command.kind==='dismiss') {
+    const row=data.occurrences.find(row=>row.task_id===request.command.task_id&&row.date===request.command.date);
+    row.dismissed_at=request.command.dismissed?'2026-10-17T03:00:00+03:00':null;
+  }
   return JSON.stringify({ok:true,data:request.action==='state'?data:{}});
 }};
 vm.createContext(context);
@@ -131,5 +135,13 @@ run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
   run('refresh(true)');
   assert.equal(scroll.scrollLeft,42);
   assert.match(get('dayReview').innerHTML,/&lt;script&gt;done&lt;\/script&gt;/);
+  data.occurrences.push({task_id:'late',date:'2026-10-01',title:'Лекция',status:'pending',can_dismiss:true,dismissed_at:null});
+  run('refresh(true)');
+  assert.match(get('unfinishedList').innerHTML,/data-dismiss="late"/);
+  await document.fire('click',new Element('button',{'data-dismiss':'late','data-date':'2026-10-01','data-dismissed':'true'}));
+  assert.match(get('unfinishedList').innerHTML,/is-dismissed/);
+  assert.match(get('unfinishedList').innerHTML,/Вернуть/);
+  await document.fire('click',new Element('button',{'data-dismiss':'late','data-date':'2026-10-01','data-dismissed':'false'}));
+  assert.equal(data.occurrences.find(row=>row.task_id==='late').dismissed_at,null);
   console.log('Mobile: legacy colors, preview during polling, save/cancel, light theme, calendar alignment, scroll and escaped history OK.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -80,7 +80,7 @@ public final class Model {
     static String key(JSONObject item) throws Exception { return item.getString("task_id")+"|"+item.getString("date"); }
     static JSONObject occurrence(JSONObject task, String day) throws Exception {
         JSONObject row = new JSONObject().put("task_id",task.getString("id")).put("date",day)
-            .put("status","pending").put("completed_at",JSONObject.NULL);
+            .put("status","pending").put("completed_at",JSONObject.NULL).put("dismissed_at",JSONObject.NULL);
         for (String field:SNAPSHOT) row.put(field,nullable(task,field));
         return row;
     }
@@ -130,6 +130,11 @@ public final class Model {
             } else if(task!=null && kind.equals("archive")) {
                 String archive=op.getString("date"); task.put("archived_date",archive);
                 for(JSONObject row:rows.values()) if(row.getString("task_id").equals(id) && row.getString("date").compareTo(archive)>=0 && row.getString("status").equals("pending")) row.put("status","cancelled");
+            } else if(task!=null && kind.equals("dismiss")) {
+                String date=op.getString("date"),key=id+"|"+date;
+                JSONObject row=rows.get(key);
+                if(row==null) {row=occurrence(task,date);rows.put(key,row);}
+                row.put("dismissed_at",nullable(op,"dismissed_at"));
             } else if(task!=null && kind.equals("complete")) {
                 String date=op.getString("date"), key=id+"|"+date;
                 JSONObject row=rows.get(key);
@@ -144,6 +149,10 @@ public final class Model {
         // Восстановить дни, проведённые офлайн; уже сохранённые снимки не заменяются.
         for(JSONObject task:tasks.values()) materializeHistory(task,rows,LocalDate.parse(today));
         for(JSONObject task:tasks.values()) if(task.optString("recurrence").equals("once")) materialize(tasks,rows,task.getString("start_date"));
+        for(JSONObject row:rows.values()) {
+            JSONObject task=tasks.get(row.getString("task_id"));
+            if(task!=null) Deadline.decorate(task,row,java.time.LocalDateTime.now());
+        }
         return new JSONObject().put("tasks",new JSONArray(tasks.values())).put("occurrences",new JSONArray(rows.values()))
             .put("pending_count",pending.length()).put("conflicts",data.getJSONArray("conflicts"))
             .put("settings",data.getJSONObject("settings")).put("last_sync",data.optString("last_sync"))
@@ -209,7 +218,7 @@ public final class Model {
             op.put("task_id",UUID.randomUUID().toString()).put("values",clean(command.getJSONObject("values"),false));
         } else {
             JSONObject view=view(data,day); String id=command.getString("task_id"); JSONObject task=task(view,id);
-            if(!task.isNull("archived_date") && !kind.equals("complete")) throw new IllegalArgumentException("Задача уже в архиве.");
+            if(!task.isNull("archived_date") && !kind.equals("complete") && !kind.equals("dismiss")) throw new IllegalArgumentException("Задача уже в архиве.");
             op.put("task_id",id);
             if(kind.equals("edit")) {
                 JSONObject checked=clean(command.getJSONObject("values"),true), before=new JSONObject(), changed=new JSONObject();
@@ -220,10 +229,21 @@ public final class Model {
                 op.put("values",changed).put("before",before);
             } else if(kind.equals("archive")) {
                 op.put("before",fields(task)).put("date",LocalDate.now().toString());
+            } else if(kind.equals("dismiss")) {
+                JSONObject row=map(view.getJSONArray("occurrences"),true).get(id+"|"+day);
+                if(row==null || !row.getString("status").equals("pending")) throw new IllegalArgumentException("Дело уже выполнено или отменено.");
+                boolean dismissed=command.getBoolean("dismissed");
+                if(dismissed==!row.isNull("dismissed_at")) return;
+                if(dismissed && !row.optBoolean("can_dismiss")) throw new IllegalArgumentException("Зачеркнуть можно после двух дополнительных часов.");
+                op.put("date",day).put("dismissed",dismissed)
+                    .put("dismissed_at",dismissed?OffsetDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx")):JSONObject.NULL)
+                    .put("before",new JSONObject().put("status",row.getString("status")).put("dismissed_at",nullable(row,"dismissed_at")));
             } else if(kind.equals("complete")) {
                 if(LocalDate.parse(day).isAfter(LocalDate.now())) throw new IllegalArgumentException("Будущую задачу пока нельзя выполнить.");
                 JSONObject row=map(view.getJSONArray("occurrences"),true).get(id+"|"+day);
                 if(row==null || row.getString("status").equals("cancelled")) throw new IllegalArgumentException("Запись задачи недоступна.");
+                if(!row.isNull("dismissed_at")) throw new IllegalArgumentException("Сначала верни зачёркнутое дело в работу.");
                 boolean done=command.getBoolean("completed");
                 if(row.getString("status").equals(done?"done":"pending")) return;
                 op.put("date",day).put("completed",done).put("completed_at",done?OffsetDateTime.now()

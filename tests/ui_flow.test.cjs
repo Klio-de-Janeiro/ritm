@@ -104,6 +104,10 @@ const context = {document, localStorage:{getItem:k=>storage.get(k),setItem:(k,v)
     else if (endpoint === '/app/exit-fullscreen') result = {exited:true};
     else if (endpoint === '/notification-test') result = {delivery:notification_delivery};
     else if (endpoint === '/progress/day') result = day_review;
+    else if (endpoint === '/occurrences/77/dismiss') {
+      current.unfinished[0].dismissed_at=body.dismissed?'2026-10-15T03:00:00+03:00':null;
+      result={id:77,dismissed_at:current.unfinished[0].dismissed_at};
+    }
     else if (endpoint === '/settings') {
       if (patch_gate) await patch_gate;
       Object.assign(current.settings, body); result = current.settings;
@@ -259,5 +263,14 @@ async function tick() { await Promise.resolve(); await Promise.resolve(); await 
   await get('heatmap').fire('mouseover',cell);await tick();
   assert.equal(get('activityTooltip').hidden,false);
   assert.match(get('activityTooltip').innerHTML,/Лекция &amp; физика/);
+  const overdue={id:77,task_id,date:'2026-10-13',title:'Лекция <script>',category:'Учёба',status:'pending',can_dismiss:true,dismissed_at:null};
+  assert.match(run('render_task('+JSON.stringify(overdue)+',false)'),/data-dismiss="77"/);
+  assert.doesNotMatch(run('render_task('+JSON.stringify({...overdue,can_dismiss:false})+',false)'),/data-dismiss=/);
+  current.unfinished=[overdue];
+  await document.fire('click',new Element('button',{'data-dismiss':'77','data-dismissed':'true'}));
+  assert.match(get('unfinishedList').innerHTML,/is-dismissed/);
+  assert.match(get('unfinishedList').innerHTML,/Лекция &lt;script&gt;/);
+  await document.fire('click',new Element('button',{'data-dismiss':'77','data-dismissed':'false'}));
+  assert.equal(current.unfinished[0].dismissed_at,null);
   console.log('UI handlers: task editing, earlier date, name draft, live palette, polling, save/cancel/reset and concurrent changes OK.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
