@@ -37,6 +37,7 @@ let mutating = false;
 let pending_confirmation = null;
 let task_signature = "";
 let notification_signature = "";
+let award_filter="all", award_expanded=false;
 let appearance_dirty = false;
 let appearance_draft = null;
 let appearance_saving = false;
@@ -125,7 +126,7 @@ async function load_state() {
     state = result;
     selected_date = state.selected_date;
     calendar_month ??= state.today.slice(0, 7);
-    const older_backend = state.version !== "0.3.8";
+    const older_backend = state.version !== "0.4.0";
     $("#connectionError").hidden = !older_backend;
     if (older_backend) $("#connectionError").textContent = "Работает другая версия Ритма. Заверши приложение через настройки или трей и запусти обновлённый Ritm.exe.";
     render();
@@ -151,7 +152,7 @@ function render() {
 }
 
 function day_details_html(value, compact = false) {
-  const list = (rows, done) => rows.length ? `<ul>${rows.map(item => `<li class="${item.dismissed_at ? "is-dismissed" : ""}"><span>${escape_html(item.title)}</span>${item.completed_at ? `<small>${done ? "Выполнено" : "Выполнено позже"}: ${escape_html(format_day(item.completed_at.slice(0,10)))} · ${escape_html(item.completed_at.slice(11,16))}</small>` : ""}</li>`).join("")}</ul>` : `<p class="muted">${done ? "Выполненных дел нет." : "Нет невыполненных дел."}</p>`;
+  const list = (rows, done) => rows.length ? `<ul>${rows.map(item => `<li class="${item.dismissed_at ? "is-dismissed" : ""}"><span>${escape_html(item.title)}${item.slot_time?" · "+item.slot_time:""}</span>${item.completed_at ? `<small>${done ? "Выполнено" : "Выполнено позже"}: ${escape_html(format_day(item.completed_at.slice(0,10)))} · ${escape_html(item.completed_at.slice(11,16))}</small>` : ""}</li>`).join("")}</ul>` : `<p class="muted">${done ? "Выполненных дел нет." : "Нет невыполненных дел."}</p>`;
   return `${compact ? `<strong>${escape_html(format_day(value.date, {day:"numeric",month:"long",year:"numeric"}))}</strong>` : ""}<section class="day-review-done"><h3>Выполнено за день · ${value.done.length}</h3>${list(value.done, true)}</section><section class="day-review-pending"><h3>${value.is_past ? "Не выполнено к концу дня" : "Ещё не выполнено"} · ${value.unfinished.length}</h3>${list(value.unfinished, false)}</section>`;
 }
 
@@ -245,6 +246,7 @@ function render_today() {
 function render_task(task, is_future) {
   const done = task.status === "done";
   const dismissed = Boolean(task.dismissed_at);
+  const interval = !!task.checkins?.length;
   const dismiss_action = !done && (dismissed || task.can_dismiss) ? `<button class="button subtle dismiss-task" data-dismiss="${task.id}" data-dismissed="${!dismissed}">${dismissed ? "Вернуть" : "Зачеркнуть"}</button>` : "";
   const grace_label = task.in_grace ? `<span class="grace-label">Продлено до ${new Date(task.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span>` : dismissed ? '<span class="grace-label">Зачёркнуто · без XP</span>' : "";
   const reminder_end = task.reminder_end_date || (task.recurrence === "once" ? task.date : null);
@@ -253,7 +255,7 @@ function render_task(task, is_future) {
   const hourly = /^(hourly|every_\d+_hours)$/.test(task.recurrence);
   const overdue = !hourly && !done && task.time && task.date <= state.today && `${task.date}T${task.time}` < state.server_time.slice(0, 16);
   const label = `${done ? "Отменить выполнение" : "Выполнить"}: ${task.title}`;
-  return `<article class="task-card${done ? " is-done" : ""}${dismissed ? " is-dismissed" : ""}" data-category="${escape_html(task.category)}"><button class="task-check" data-complete="${task.id}" data-completed="${!done}" aria-label="${escape_html(label)}" aria-pressed="${done}"${is_future || dismissed ? " disabled" : ""}>${done ? icon("check") : ""}</button><span class="category-icon">${icon(categories[task.category] || "personal")}</span><div class="task-content"><h3 class="task-title">${!task.archived_date ? `<button class="task-title-edit" data-edit="${task.task_id}" aria-label="Открыть задачу: ${escape_html(task.title)}">${escape_html(task.title)}</button>` : escape_html(task.title)}</h3><div class="task-meta">${grace_label}<span class="category-text">${escape_html(task.category)}</span><i class="dot"></i><span class="recurrence">${task.recurrence !== "once" ? icon("repeat") : ""}${recurrence_names[task.recurrence] || ""}</span>${task.date < selected_date ? `<i class="dot"></i><span>С ${format_day(task.date)}</span>` : ""}${task.snooze_until ? `<i class="dot"></i><span>Отложено до ${new Date(task.snooze_until).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</span>` : ""}</div>${task.notes ? `<p class="notes-preview">${escape_html(task.notes)}</p>` : ""}</div><div class="task-end">${dismiss_action}${task.time ? `<span class="task-time${overdue ? " overdue" : ""}" title="${reminder_expired ? "Срок напоминания завершён" : reminder_active ? "Напоминание включено" : "Время задачи, без уведомления"}">${icon(reminder_active ? "bell" : "clock")}<span>${hourly ? "С " : ""}${task.time}</span></span>` : ""}<i class="priority-dot ${task.priority}" title="${task.priority === "high" ? "Важное" : task.priority === "low" ? "Без спешки" : "Обычный приоритет"}"></i>${!task.archived_date ? `<button class="button subtle task-edit" data-edit="${task.task_id}" aria-label="Редактировать: ${escape_html(task.title)}">${icon("edit")}<span>Изменить</span></button>` : ""}</div></article>`;
+  return `<article class="task-card${done ? " is-done" : ""}${dismissed ? " is-dismissed" : ""}" data-category="${escape_html(task.category)}"><button class="task-check" data-complete="${task.id}" data-completed="${!done}" aria-label="${escape_html(label)}" aria-pressed="${done}"${is_future || dismissed || interval ? " disabled" : ""}>${done ? icon("check") : ""}</button><span class="category-icon">${icon(categories[task.category] || "personal")}</span><div class="task-content"><h3 class="task-title">${!task.archived_date ? `<button class="task-title-edit" data-edit="${task.task_id}" aria-label="Открыть задачу: ${escape_html(task.title)}">${escape_html(task.title)}</button>` : escape_html(task.title)}</h3><div class="task-meta">${grace_label}<span class="category-text">${escape_html(task.category)}</span><i class="dot"></i><span class="recurrence">${task.recurrence !== "once" ? icon("repeat") : ""}${recurrence_names[task.recurrence] || ""}</span>${task.date < selected_date ? `<i class="dot"></i><span>С ${format_day(task.date)}</span>` : ""}${task.snooze_until ? `<i class="dot"></i><span>Отложено до ${new Date(task.snooze_until).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</span>` : ""}</div>${window.RitmProgress.checks(task)}${task.notes ? `<p class="notes-preview">${escape_html(task.notes)}</p>` : ""}</div><div class="task-end">${dismiss_action}${task.time ? `<span class="task-time${overdue ? " overdue" : ""}" title="${reminder_expired ? "Срок напоминания завершён" : reminder_active ? "Напоминание включено" : "Время задачи, без уведомления"}">${icon(reminder_active ? "bell" : "clock")}<span>${hourly ? "С " : ""}${task.time}</span></span>` : ""}<i class="priority-dot ${task.priority}" title="${task.priority === "high" ? "Важное" : task.priority === "low" ? "Без спешки" : "Обычный приоритет"}"></i>${!task.archived_date ? `<button class="button subtle task-edit" data-edit="${task.task_id}" aria-label="Редактировать: ${escape_html(task.title)}">${icon("edit")}<span>Изменить</span></button>` : ""}</div></article>`;
 }
 
 /** Сформировать пустое состояние с действиями по текущему контексту. */
@@ -308,15 +310,9 @@ function render_progress() {
     const heading = previous !== day ? `<p class="history-date">${format_day(day, {day: "numeric", month: "long", year: "numeric"})}</p>` : "";
     previous = day;
     const clock = new Date(item.completed_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
-    return `${heading}<div class="history-row" data-category="${escape_html(item.category)}"><span class="history-check">${icon("check")}</span><div class="history-info"><strong>${escape_html(item.title)}</strong><small>${escape_html(item.category)} · +10 XP</small></div><time>${clock}</time><button class="text-button" data-complete="${item.id}" data-completed="false" aria-label="Отменить выполнение: ${escape_html(item.title)}">Отменить</button></div>`;
+    return `${heading}<div class="history-row" data-category="${escape_html(item.category)}"><span class="history-check">${icon("check")}</span><div class="history-info"><strong>${escape_html(item.title)}${item.slot_time?" · "+item.slot_time:""}</strong><small>${escape_html(item.category)} · +10 XP</small></div><time>${clock}</time><button class="text-button" ${item.slot_time ? `data-check-slot="${item.slot_time}" data-slot-id="${item.id}" data-slot-completed="false"` : `data-complete="${item.id}" data-completed="false"`} aria-label="Отменить выполнение: ${escape_html(item.title)}">Отменить</button></div>`;
   }).join("") : '<p class="history-empty">Первая победа уже рядом.<br>Отметь задачу выполненной — история начнётся.</p>';
-  const achievements = [
-    ["Первый шаг", "Выполнить первую задачу", "spark", summary.done >= 1],
-    ["Набираю темп", "Выполнить 10 задач", "bolt", summary.done >= 10],
-    ["В своём ритме", "3 активных дня подряд", "flame", summary.longest_streak >= 3],
-    ["Это уже привычка", "Выполнить 50 задач", "personal", summary.done >= 50],
-  ];
-  $("#achievements").innerHTML = achievements.map(([title, text, symbol, unlocked]) => `<div class="achievement${unlocked ? " unlocked" : ""}"><span class="achievement-symbol">${icon(symbol)}</span><div><h3>${title}</h3><p>${text}</p></div>${unlocked ? icon("check", true) : ""}</div>`).join("");
+  $("#achievements").innerHTML = window.RitmProgress.html(window.RitmProgress.awards(state.progress_events||state.history,state.tasks,state.today,state.progress_facts),award_filter,award_expanded);
 }
 
 /** Обновить настройки и показывать реальную доступность Windows tray. */
@@ -448,6 +444,7 @@ async function open_task(task_id = null) {
     $("#taskDate").value = task?.start_date || selected_date;
     $("#taskRecurrence").value = task?.recurrence || "once";
     $("#taskTime").value = task ? (task.time || "") : "09:00";
+    $("#taskRepeatUntil").value=task?.repeat_until || "21:00";
     $("#taskReminderEnd").value = task ? (task.reminder_end_date || (task.recurrence === "once" ? task.start_date : "")) : $("#taskDate").value;
     editor_day = $("#taskDate").value;
     $("#taskEventDate").value = task?.event_date || "";
@@ -511,6 +508,12 @@ document.addEventListener("click", async event => {
   if (!button || button.disabled) return;
   if (button.dataset.view) return change_view(button.dataset.view);
   if (button.dataset.route) return change_view(button.dataset.route);
+  if (button.dataset.awardFilter) {award_filter=button.dataset.awardFilter;award_expanded=false;return render_progress();}
+  if (button.dataset.awardExpand) {award_expanded=button.dataset.awardExpand==='true';return render_progress();}
+  if (button.dataset.checkSlot) {
+    try {button.disabled=true;await api(`/occurrences/${button.dataset.slotId}/check`,"POST",{time:button.dataset.checkSlot,completed:button.dataset.slotCompleted==='true'});await load_state();}
+    catch(error){toast(error.message,true);}finally{button.disabled=false;}return;
+  }
   if (button.dataset.activityDay) { hide_activity_tooltip(); return show_day_review(button.dataset.activityDay, true); }
   if (button.dataset.date) return select_day(button.dataset.date);
   if (button.hasAttribute("data-add")) return open_task();
@@ -590,6 +593,7 @@ $("#taskForm").addEventListener("submit", async event => {
     reminder_end_date: $("#taskReminderEnd").value || null,
     event_date: $("#taskRecurrence").value === "event" ? ($("#taskEventDate").value || null) : null,
     escalation_days: Number($("#taskEscalationDays").value),
+    repeat_until: $("#taskRepeatUntil").value || null,
     time: $("#taskTime").value || null, notes: $("#taskNotes").value,
   };
   try {
@@ -801,6 +805,7 @@ poll_timer = setInterval(() => {
 
 function update_reminder_fields() {
   const mode = $("#taskRecurrence").value;
+  $("#taskRepeatFields").hidden=!/^(hourly|every_\d+_hours)$/.test(mode);
   const fixed = mode === "event" || mode === "three_times_daily";
   $("#taskEventFields").hidden = mode !== "event";
   $("#taskEventDate").required = mode === "event";

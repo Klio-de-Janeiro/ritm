@@ -6,8 +6,8 @@ android {
         applicationId 'ru.klio.ritm'
         minSdk 26
         targetSdk 35
-        versionCode 10
-        versionName '0.3.8'
+        versionCode 11
+        versionName '0.4.0'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     // Постоянная локальная подпись позволяет ставить обновления поверх приложения.
@@ -31,6 +31,8 @@ android {
 tasks.register('prepareRitmIcon') {
     inputs.file('../../Ritm.png')
     inputs.file('../../ritm/web/theme.js')
+    inputs.file('../../ritm/web/awards.js')
+    inputs.file('../../ritm/web/progress.js')
     outputs.dir(layout.buildDirectory.dir('generated/ritmAssets'))
     outputs.dir(layout.buildDirectory.dir('generated/ritmRes'))
     doLast {
@@ -49,7 +51,7 @@ tasks.register('prepareRitmIcon') {
             destination.parentFile.mkdirs(); javax.imageio.ImageIO.write(image, 'png', destination)
         }
         copy {
-            from '../../ritm/web/theme.js'
+            from '../../ritm/web/theme.js', '../../ritm/web/awards.js', '../../ritm/web/progress.js'
             into layout.buildDirectory.dir('generated/ritmAssets')
         }
     }

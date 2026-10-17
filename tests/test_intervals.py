@@ -38,17 +38,15 @@ class IntervalTests(unittest.TestCase):
             self.store.archive_task(task["id"])
             self.now = datetime(2026, 10, 16, 9, tzinfo=self.now.tzinfo)
 
-    def test_five_hour_interval_continues_through_midnight(self):
-        """09 → 14 → 19 → 00 → 05; отсчёт не сбрасывается каждое утро."""
+    def test_five_hour_interval_uses_a_daily_window(self):
         self.create("every_5_hours")
         self.store.due_notifications()
-        self.now = self.now.replace(day=17, hour=0)
-        self.assertEqual(len(self.store.due_notifications()), 1)
-        self.assertEqual(self.store.due_notifications(), [])
-        self.now = self.now.replace(hour=4, minute=59)
-        self.assertEqual(self.store.due_notifications(), [])
-        self.now = self.now.replace(hour=5, minute=0)
-        self.assertEqual(len(self.store.due_notifications()), 1)
+        self.now = self.now.replace(day=17,hour=0)
+        self.assertEqual(self.store.due_notifications(),[])
+        self.now = self.now.replace(hour=5)
+        self.assertEqual(self.store.due_notifications(),[])
+        self.now = self.now.replace(hour=9)
+        self.assertEqual(len(self.store.due_notifications()),1)
 
     def test_restart_coalesces_missed_slots_and_done_stops_today(self):
         """После сна один актуальный сигнал; выполнение завершает день."""
@@ -60,7 +58,7 @@ class IntervalTests(unittest.TestCase):
         row = restarted.state(self.now.date().isoformat())["tasks"][0]
         restarted.complete(row["id"])
         self.now += timedelta(hours=1)
-        self.assertEqual(restarted.due_notifications(), [])
+        self.assertEqual(len(restarted.due_notifications()), 1)
         self.now += timedelta(days=1)
         self.assertEqual(len(restarted.due_notifications()), 1)
 

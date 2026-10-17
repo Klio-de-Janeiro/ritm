@@ -38,7 +38,7 @@ class Element {
   scrollIntoView() {}
   append() {}
 }
-for (const match of html.matchAll(/<(input|button|section|dialog|form|div|p|span|strong|h[123]|output|select|textarea|aside|meta|label|a|progress)\b([^>]*)>/g)) {
+for (const match of html.matchAll(/<(input|button|section|dialog|form|div|p|span|strong|h[123]|output|select|textarea|aside|meta|label|a|progress|article)\b([^>]*)>/g)) {
   const attrs = {};
   for (const attr of match[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g)) attrs[attr[1]] = attr[2] || '';
   const element = new Element(match[1], attrs); elements.push(element);
@@ -97,6 +97,7 @@ context.RitmNative={call(encoded){
 vm.createContext(context);
 const run=code=>vm.runInContext(code,context);
 run(fs.readFileSync(path.join(__dirname,'../ritm/web/theme.js'),'utf8'));
+for(const name of ['awards.js','progress.js']) run(fs.readFileSync(path.join(__dirname,'../ritm/web',name),'utf8'));
 run(fs.readFileSync(path.join(root,'appearance.js'),'utf8'));
 run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
 (async()=>{

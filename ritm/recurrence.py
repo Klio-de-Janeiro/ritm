@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 from .config import HOUR_INTERVALS
+from .checkins import unpack, decorate
 
 
 def deadline(row):
@@ -36,7 +37,7 @@ def grace_due(row, now):
 
 
 def occurrence_state(row, now):
-    result = dict(row)
+    result = decorate(row, now)
     end = deadline(row)
     until = end + timedelta(hours=2)
     local = now.replace(tzinfo=None)
@@ -92,6 +93,16 @@ def notification_due(row, now):
         return False
     if row["recurrence"] == "event" and now.date().isoformat() > row["event_date"]:
         return False
+    data = unpack(row)
+    if data["slots"]:
+        local = now.replace(tzinfo=None)
+        past = [value for value in data["slots"] if datetime.fromisoformat(row["date"]+"T"+value) <= local]
+        if row["date"] != now.date().isoformat() or not past or past[-1] in data["checks"]:
+            return False
+        if row["snooze_until"]:
+            return now >= datetime.fromisoformat(row["snooze_until"])
+        slot = datetime.fromisoformat(row["date"]+"T"+past[-1])
+        return not row["notified_at"] or slot > datetime.fromisoformat(row["notified_at"]).replace(tzinfo=None)
     if row["snooze_until"]:
         return now >= datetime.fromisoformat(row["snooze_until"])
     times = daily_times(row, now.date())

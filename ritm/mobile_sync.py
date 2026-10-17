@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .store import ValidationError, clean_task, parse_day, scheduled, as_bool
 
 FIELDS = ("title", "notes", "category", "priority", "recurrence",
-          "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days")
+          "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until")
 SNAPSHOT = ("title", "notes", "category", "priority", "time", "reminder")
 LOGGER = logging.getLogger(__name__)
 
@@ -90,7 +90,10 @@ class SyncEngine:
             tasks = [normalized(row) for row in db.execute("SELECT * FROM tasks")]
             occurrences = [normalized(row) for row in db.execute(
                 "SELECT task_id,date,title,notes,category,priority,time,reminder,"
-                "status,completed_at,dismissed_at FROM occurrences WHERE status!='cancelled'")]
+                "status,completed_at,dismissed_at,slots,checks FROM occurrences WHERE status!='cancelled' OR (checks IS NOT NULL AND checks!='{}')")]
+            for row in occurrences:
+                row["slots"] = json.loads(row["slots"]) if row["slots"] else None
+                row["checks"] = json.loads(row["checks"]) if row["checks"] else {}
         return {"protocol": 2, "server_id": self.server_id, "accepted": accepted,
                 "conflicts": conflicts, "tasks": tasks, "occurrences": occurrences,
                 "server_time": self.store.clock().isoformat()}
@@ -128,9 +131,28 @@ class SyncEngine:
                 day += timedelta(days=1)
             self.store._materialize(db, start)
             self.store._materialize(db, today)
+            self.store._init_checkins(db)
             return
         if not current:
             raise ValidationError("На ноутбуке нет этой задачи.", 409)
+        if kind == "check":
+            day = parse_day(op.get("date"))
+            row = db.execute("SELECT * FROM occurrences WHERE task_id=? AND date=?",(task_id,day.isoformat())).fetchone()
+            if not row:
+                raise ValidationError("Подход не найден.",409)
+            from .checkins import unpack
+            slot = op.get("time")
+            current_check = unpack(row)["checks"].get(slot)
+            before = op.get("before")
+            if current_check != before:
+                raise ValidationError("Этот подход уже изменён на ноутбуке.",409)
+            completed = as_bool(op.get("completed"),"completed")
+            try:
+                when = datetime.fromisoformat(op["completed_at"]) if completed else None
+            except (KeyError,TypeError,ValueError) as error:
+                raise ValidationError("Некорректное время подхода.") from error
+            self.store._check(db,row["id"],slot,completed,when)
+            return
         if kind == "dismiss":
             day = parse_day(op.get("date"))
             row = db.execute("SELECT * FROM occurrences WHERE task_id=? AND date=?", (task_id, day.isoformat())).fetchone()
@@ -177,6 +199,13 @@ class SyncEngine:
                     completed_at = moment.isoformat()
                 except (KeyError, TypeError, ValueError) as error:
                     raise ValidationError("Некорректное время выполнения.") from error
+            from .checkins import unpack
+            if unpack(occurrence)["slots"]:
+                past = [slot for slot in unpack(occurrence)["slots"] if datetime.fromisoformat(day.isoformat()+"T"+slot)<=self.store.clock().replace(tzinfo=None)]
+                if not past:
+                    raise ValidationError("Подход ещё не наступил.")
+                self.store._check(db,occurrence["id"],past[-1],completed,datetime.fromisoformat(completed_at) if completed else None)
+                return
             if not completed and current["archived_date"] and day.isoformat() >= current["archived_date"]:
                 desired = "cancelled"
             db.execute("UPDATE occurrences SET status=?,completed_at=?,snooze_until=NULL WHERE id=?",
@@ -195,7 +224,7 @@ class SyncEngine:
             raise ValidationError("Неизвестные поля изменения.")
         compared = values if kind == "edit" else FIELDS
         for key in compared:
-            if kind == "archive" and key not in before and key in ("reminder_end_date", "event_date", "escalation_days"):
+            if kind == "archive" and key not in before and key in ("reminder_end_date", "event_date", "escalation_days", "repeat_until"):
                 if current[key] == (3 if key == "escalation_days" else None):
                     continue
             if key not in before or (current[key] != before[key] and current[key] != values.get(key)):
@@ -220,6 +249,9 @@ class SyncEngine:
         for occurrence in rows.fetchall():
             if occurrence["date"] < today.isoformat():
                 continue
+            from .checkins import unpack, plan
+            if unpack(occurrence)["checks"]:
+                continue
             status = "pending" if scheduled(task, parse_day(occurrence["date"])) else "cancelled"
             changed = (task["time"] != occurrence["time"]
                        or task["reminder"] != bool(occurrence["reminder"])
@@ -232,6 +264,8 @@ class SyncEngine:
                        tuple(task[key] for key in SNAPSHOT) + (status,
                        None if changed else occurrence["notified_at"],
                        None if changed else occurrence["snooze_until"], occurrence["id"]))
+            slots = plan(task)
+            db.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?",(json.dumps(slots) if slots else None,occurrence["id"]))
         self.store._materialize(db, today)
         self.store._materialize(db, start)
 

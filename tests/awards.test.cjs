@@ -1,0 +1,19 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const context={window:{}};vm.createContext(context);
+for(const name of ['awards.js','progress.js'])vm.runInContext(fs.readFileSync('ritm/web/'+name,'utf8'),context);
+const engine=context.window.RitmProgress,catalog=context.window.RitmAwardCatalog;
+assert.equal(catalog.length,100);assert.equal(new Set(catalog.map(a=>a.id)).size,100);
+assert.equal(new Set(catalog.map(a=>a.title)).size,100);
+assert.ok(catalog.every(a=>!('category' in a)));
+const row={id:1,task_id:'sport',title:'Спорт <script>',date:'2026-10-18',status:'done',
+  slots:['09:00','12:00','15:00','18:00','21:00'],checks:Object.fromEntries(['09:00','12:00','15:00','18:00','21:00'].map(time=>[time,'2026-10-18T'+time+':00+03:00']))};
+const events=engine.events([row]),result=engine.awards(events,[row],'2026-10-18');
+assert.equal(events.length,5);assert.equal(result.metrics.same,5);
+assert.ok(result.personal.some(a=>a.title==='Спорт <script> · 5 раз'));
+assert.ok(result.catalog.find(a=>a.id==='same-5').unlocked);
+assert.ok(!engine.html(result).includes('<script>'));assert.ok(engine.html(result).includes('&lt;script&gt;'));
+const cancelled={...row,status:'cancelled'};assert.equal(engine.events([cancelled]).length,5);
+const corrected={...row,status:'pending',checks:{'09:00':'2026-10-18T12:10:00+03:00'}};
+assert.equal(engine.awards(engine.events([corrected]),[corrected],'2026-10-18').metrics.total,1);
+assert.equal(engine.awards([],[],'2026-10-18').earned,0);
+console.log('100 unique awards, personal action milestones, slot events, reversal, archive and escaping OK.');

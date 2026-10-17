@@ -19,12 +19,12 @@ LOGGER = logging.getLogger(__name__)
 WEB_ROOT = Path(__file__).parent / "web"
 WEB_FILES = (
     "index.html", "styles.css", "themes.css", "theme.js", "app.js",
-    "icon.svg", "icon.ico", "icon.png", "companions.js",
+    "icon.svg", "icon.ico", "icon.png", "companions.js", "awards.js", "progress.js",
 )
 MAX_BODY = 65536
 TASK_PATH = re.compile(r"/api/v1/tasks/([a-f0-9-]{36})$")
 OCCURRENCE_PATH = re.compile(
-    r"/api/v1/occurrences/([1-9][0-9]*)/(complete|snooze|dismiss)$"
+    r"/api/v1/occurrences/([1-9][0-9]*)/(complete|snooze|dismiss|check)$"
 )
 
 
@@ -42,7 +42,7 @@ def load_web_assets():
         if not assets[name]:
             raise RuntimeError(f"Пустой файл интерфейса: {name}")
     assets["styles.css"] += b"\n" + assets["themes.css"]
-    assets["app.js"] = assets["theme.js"] + b"\n;\n" + assets["app.js"]
+    assets["app.js"] = assets["theme.js"] + b"\n;\n" + assets["awards.js"] + b"\n;\n" + assets["progress.js"] + b"\n;\n" + assets["app.js"]
     assets["app.js"] += b"\n;\n" + assets["companions.js"]
     return assets
 
@@ -210,6 +210,8 @@ class Handler(BaseHTTPRequestHandler):
             "/": "index.html", "/index.html": "index.html",
             "/styles.css": "styles.css", "/app.js": "app.js",
             "/theme.js": "theme.js",
+            "/awards.js": "awards.js",
+            "/progress.js": "progress.js",
             "/themes.css": "themes.css",
             "/companions.js": "companions.js",
             "/icon.svg": "icon.svg", "/icon.png": "icon.png", "/favicon.ico": "icon.ico",
@@ -287,6 +289,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValidationError("Некорректный идентификатор.")
             if occurrence_match[2] == "complete":
                 result = store.complete(occurrence_id, body.get("completed", True))
+            elif occurrence_match[2] == "check":
+                result = store.check(occurrence_id,body.get("time"),body.get("completed",True))
             elif occurrence_match[2] == "dismiss":
                 result = store.dismiss(occurrence_id, body.get("dismissed", True))
             else:

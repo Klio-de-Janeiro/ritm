@@ -119,6 +119,7 @@ const context = {document, localStorage:{getItem:k=>storage.get(k),setItem:(k,v)
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(root,'theme.js'),'utf8'),context);
+for(const name of ['awards.js','progress.js']) vm.runInContext(fs.readFileSync(path.join(root,name),'utf8'),context);
 current.settings = {...context.window.RitmTheme.defaults, display_name:'Клио', notifications:true, sound:true, autostart:false};
 vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),context);
 const get=id=>ids.get(id);

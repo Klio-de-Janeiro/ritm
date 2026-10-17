@@ -55,6 +55,19 @@ public final class Reminders {
                     if(!day.equals(today.toString()) && !task.getString("recurrence").equals("once")) continue;
                     when=LocalDateTime.parse(day+"T"+row.getString("time")).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                     key=Model.key(row)+"|"+row.getString("time");
+                    JSONArray slots=row.optJSONArray("slots");
+                    if(slots!=null && slots.length()>0) {
+                        String active=null;
+                        for(int n=0;n<slots.length();n++) {
+                            String value=slots.getString(n);
+                            LocalDateTime candidate=LocalDateTime.parse(day+"T"+value);
+                            if(candidate.isAfter(now.toLocalDateTime())) next=Math.min(next,candidate.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+                            else active=value;
+                        }
+                        if(active==null || row.getJSONObject("checks").has(active)) continue;
+                        when=LocalDateTime.parse(day+"T"+active).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                        key=Model.key(row)+"|slot|"+active;
+                    } else {
                     String[] times=Model.dailyTimes(task,today);
                     if(times.length>0) {
                         LocalDateTime slot=null;
@@ -77,6 +90,7 @@ public final class Reminders {
                         if(slot==null) continue;
                         when=slot.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
                         key=Model.key(row)+"|"+slot.toString();
+                    }
                     }
                     }
                     if(delivered.has(key)) continue;

@@ -8,7 +8,7 @@ import java.util.*;
 
 /** Чистая модель: снимок ноутбука + долговечная очередь локальных операций. */
 public final class Model {
-    static final String[] FIELDS = {"title","notes","category","priority","recurrence","start_date","time","reminder","reminder_end_date","event_date","escalation_days"};
+    static final String[] FIELDS = {"title","notes","category","priority","recurrence","start_date","time","reminder","reminder_end_date","event_date","escalation_days","repeat_until"};
     static final String[] SNAPSHOT = {"title","notes","category","priority","time","reminder"};
     private Model() {}
     static int hourInterval(String recurrence) {
@@ -82,6 +82,7 @@ public final class Model {
         JSONObject row = new JSONObject().put("task_id",task.getString("id")).put("date",day)
             .put("status","pending").put("completed_at",JSONObject.NULL).put("dismissed_at",JSONObject.NULL);
         for (String field:SNAPSHOT) row.put(field,nullable(task,field));
+        row.put("slots",Checkins.plan(task)).put("checks",new JSONObject());
         return row;
     }
     static LinkedHashMap<String,JSONObject> map(JSONArray array, boolean occurrences) throws Exception {
@@ -124,12 +125,19 @@ public final class Model {
                 JSONObject values=op.getJSONObject("values");
                 for(Iterator<String> it=values.keys();it.hasNext();) {String field=it.next();task.put(field,values.get(field));}
                 for(JSONObject row:rows.values()) if(row.getString("task_id").equals(id) && !row.getString("status").equals("done") && row.getString("date").compareTo(today)>=0) {
+                    if(row.optJSONObject("checks")!=null && row.getJSONObject("checks").length()>0) continue;
                     for(String field:SNAPSHOT) row.put(field,nullable(task,field));
                     row.put("status",scheduled(task,row.getString("date"))?"pending":"cancelled");
+                    row.put("slots",Checkins.plan(task)).put("checks",new JSONObject());
                 }
             } else if(task!=null && kind.equals("archive")) {
                 String archive=op.getString("date"); task.put("archived_date",archive);
                 for(JSONObject row:rows.values()) if(row.getString("task_id").equals(id) && row.getString("date").compareTo(archive)>=0 && row.getString("status").equals("pending")) row.put("status","cancelled");
+            } else if(task!=null && kind.equals("check")) {
+                String date=op.getString("date"),key=id+"|"+date;
+                JSONObject row=rows.get(key);if(row==null) {row=occurrence(task,date);rows.put(key,row);}
+                if(row.isNull("slots")) row.put("slots",Checkins.plan(task));
+                Checkins.apply(row,op.getString("time"),op.getBoolean("completed"),op.opt("completed_at"));
             } else if(task!=null && kind.equals("dismiss")) {
                 String date=op.getString("date"),key=id+"|"+date;
                 JSONObject row=rows.get(key);
@@ -151,7 +159,7 @@ public final class Model {
         for(JSONObject task:tasks.values()) if(task.optString("recurrence").equals("once")) materialize(tasks,rows,task.getString("start_date"));
         for(JSONObject row:rows.values()) {
             JSONObject task=tasks.get(row.getString("task_id"));
-            if(task!=null) Deadline.decorate(task,row,java.time.LocalDateTime.now());
+            if(task!=null) {Deadline.decorate(task,row,java.time.LocalDateTime.now());Checkins.decorate(task,row,java.time.LocalDateTime.now());}
         }
         return new JSONObject().put("tasks",new JSONArray(tasks.values())).put("occurrences",new JSONArray(rows.values()))
             .put("pending_count",pending.length()).put("conflicts",data.getJSONArray("conflicts"))
@@ -165,11 +173,12 @@ public final class Model {
         JSONObject task=new JSONObject().put("title","").put("notes","").put("category","Личное")
             .put("priority","normal").put("recurrence","once").put("start_date",LocalDate.now().toString())
             .put("time",JSONObject.NULL).put("reminder",false);
-        task.put("reminder_end_date",JSONObject.NULL).put("event_date",JSONObject.NULL).put("escalation_days",3);
+        task.put("reminder_end_date",JSONObject.NULL).put("event_date",JSONObject.NULL).put("escalation_days",3).put("repeat_until",JSONObject.NULL);
         for(String field:FIELDS) if(source.has(field)) task.put(field,source.get(field));
         for(String field:new String[]{"title","notes"}) {
             if(!(task.get(field) instanceof String)) throw new IllegalArgumentException("Название и заметка должны быть текстом.");
             task.put(field,task.getString(field).trim());
+            if(field.equals("title") && !task.getString(field).isEmpty()) {String title=task.getString(field);task.put(field,title.substring(0,1).toUpperCase(java.util.Locale.ROOT)+title.substring(1));}
         }
         if(task.getString("title").isEmpty() || task.getString("title").length()>200 || task.getString("notes").length()>2000) throw new IllegalArgumentException("Название: 1–200 символов. Заметка: до 2000.");
         if(!Arrays.asList("Работа","Учёба","Здоровье","Личное").contains(task.getString("category"))) throw new IllegalArgumentException("Неизвестная категория.");
@@ -196,6 +205,11 @@ public final class Model {
         }
         if(task.optString("time").isEmpty()) task.put("time",JSONObject.NULL);
         if(!task.isNull("time") && !task.getString("time").matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]")) throw new IllegalArgumentException("Время: ЧЧ:ММ.");
+        if(hourInterval(task.getString("recurrence"))>0) {
+            String timeStart=task.optString("time","09:00"),end=task.isNull("repeat_until")?(timeStart.compareTo("21:00")>0?timeStart:"21:00"):task.getString("repeat_until");
+            if(!end.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]") || end.compareTo(timeStart)<0) throw new IllegalArgumentException("Конец подходов должен быть не раньше начала.");
+            task.put("repeat_until",end);
+        } else task.put("repeat_until",JSONObject.NULL);
         if(task.getBoolean("reminder") && task.isNull("time")) throw new IllegalArgumentException("Для напоминания укажи время.");
         if(hourInterval(task.getString("recurrence"))>0 && !task.getBoolean("reminder")) throw new IllegalArgumentException("Для часового повтора включи напоминание и укажи время.");
         return task;
@@ -218,7 +232,7 @@ public final class Model {
             op.put("task_id",UUID.randomUUID().toString()).put("values",clean(command.getJSONObject("values"),false));
         } else {
             JSONObject view=view(data,day); String id=command.getString("task_id"); JSONObject task=task(view,id);
-            if(!task.isNull("archived_date") && !kind.equals("complete") && !kind.equals("dismiss")) throw new IllegalArgumentException("Задача уже в архиве.");
+            if(!task.isNull("archived_date") && !Arrays.asList("complete","dismiss","check").contains(kind)) throw new IllegalArgumentException("Задача уже в архиве.");
             op.put("task_id",id);
             if(kind.equals("edit")) {
                 JSONObject checked=clean(command.getJSONObject("values"),true), before=new JSONObject(), changed=new JSONObject();
@@ -229,6 +243,17 @@ public final class Model {
                 op.put("values",changed).put("before",before);
             } else if(kind.equals("archive")) {
                 op.put("before",fields(task)).put("date",LocalDate.now().toString());
+            } else if(kind.equals("check")) {
+                JSONObject row=map(view.getJSONArray("occurrences"),true).get(id+"|"+day);
+                String time=command.getString("time");JSONArray slots=row==null?null:row.optJSONArray("slots");
+                boolean found=false;if(slots!=null) for(int n=0;n<slots.length();n++) if(slots.getString(n).equals(time)) found=true;
+                if(!found || !row.isNull("dismissed_at") || row.getString("status").equals("cancelled")) throw new IllegalArgumentException("Подход недоступен.");
+                if(java.time.LocalDateTime.parse(day+"T"+time).isAfter(java.time.LocalDateTime.now())) throw new IllegalArgumentException("Будущий подход пока нельзя отметить.");
+                boolean completed=command.getBoolean("completed");
+                Object before=row.getJSONObject("checks").opt(time);
+                op.put("date",day).put("time",time).put("completed",completed)
+                    .put("before",before==null?JSONObject.NULL:before)
+                    .put("completed_at",completed?OffsetDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx")):JSONObject.NULL);
             } else if(kind.equals("dismiss")) {
                 JSONObject row=map(view.getJSONArray("occurrences"),true).get(id+"|"+day);
                 if(row==null || !row.getString("status").equals("pending")) throw new IllegalArgumentException("Дело уже выполнено или отменено.");
@@ -244,6 +269,15 @@ public final class Model {
                 JSONObject row=map(view.getJSONArray("occurrences"),true).get(id+"|"+day);
                 if(row==null || row.getString("status").equals("cancelled")) throw new IllegalArgumentException("Запись задачи недоступна.");
                 if(!row.isNull("dismissed_at")) throw new IllegalArgumentException("Сначала верни зачёркнутое дело в работу.");
+                if(row.optJSONArray("slots")!=null && row.getJSONArray("slots").length()>0) {
+                    String active=null;
+                    for(int n=0;n<row.getJSONArray("slots").length();n++) {
+                        String value=row.getJSONArray("slots").getString(n);
+                        if(!java.time.LocalDateTime.parse(day+"T"+value).isAfter(java.time.LocalDateTime.now())) active=value;
+                    }
+                    if(active==null) throw new IllegalArgumentException("Первый подход ещё не наступил.");
+                    mutate(data,copy(command).put("kind","check").put("time",active));return;
+                }
                 boolean done=command.getBoolean("completed");
                 if(row.getString("status").equals(done?"done":"pending")) return;
                 op.put("date",day).put("completed",done).put("completed_at",done?OffsetDateTime.now()

@@ -269,7 +269,7 @@ class StoreTests(unittest.TestCase):
     def test_newer_schema_cannot_be_downgraded(self):
         """Старая сборка не должна переписывать схему новой базы."""
         with closing(sqlite3.connect(self.path)) as connection:
-            connection.execute("PRAGMA user_version=4")
+            connection.execute("PRAGMA user_version=5")
             connection.commit()
         with self.assertRaises(RuntimeError):
             Store(self.path)

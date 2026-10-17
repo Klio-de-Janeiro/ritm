@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request) {return true;}
             @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request) {
                 Uri uri=request.getUrl();String path=uri.getPath();
-                if(!"https".equals(uri.getScheme()) || !"ritm.invalid".equals(uri.getHost()) || !Arrays.asList("/index.html","/mobile.css","/mobile.js","/theme.js","/appearance.js","/icon.png").contains(path)) return blocked();
+                if(!"https".equals(uri.getScheme()) || !"ritm.invalid".equals(uri.getHost()) || !Arrays.asList("/index.html","/mobile.css","/mobile.js","/theme.js","/appearance.js","/awards.js","/progress.js","/icon.png").contains(path)) return blocked();
                 try {
                     String type=path.endsWith(".html")?"text/html":path.endsWith(".css")?"text/css":path.endsWith(".js")?"application/javascript":"image/png";
                     Map<String,String> headers=new HashMap<>();

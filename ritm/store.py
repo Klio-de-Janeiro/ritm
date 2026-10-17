@@ -14,6 +14,7 @@ from .config import (
     PRIORITIES, RECURRENCES, THEMES,
 )
 from .recurrence import notification_due, grace_due, occurrence_state, deadline, missed_deadline
+from .checkins import plan as checkin_plan, decorate as decorate_checks, unpack, events as completion_events
 
 
 SCHEMA = """
@@ -108,7 +109,7 @@ def clean_task(payload, today, current=None):
         raise ValidationError("Ожидается JSON-объект задачи.")
     fields = {
         "title", "notes", "category", "priority", "recurrence",
-        "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days",
+        "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until",
     }
     if set(payload) - fields:
         raise ValidationError("В задаче есть неизвестные поля.")
@@ -116,7 +117,7 @@ def clean_task(payload, today, current=None):
         "title": "", "notes": "", "category": "Личное",
         "priority": "normal", "recurrence": "once",
         "start_date": today.isoformat(), "time": None, "reminder": False,
-        "reminder_end_date": None, "event_date": None, "escalation_days": 3,
+        "reminder_end_date": None, "event_date": None, "escalation_days": 3, "repeat_until": None,
     }
     if current:
         result.update({key: current[key] for key in fields})
@@ -131,6 +132,8 @@ def clean_task(payload, today, current=None):
         if not isinstance(result[key], str):
             raise ValidationError(f"Поле {key} должно быть строкой.")
         result[key] = result[key].strip()
+        if key == "title" and result[key]:
+            result[key] = result[key][0].upper() + result[key][1:]
         if len(result[key]) > maximum:
             raise ValidationError(f"Поле {key}: максимум {maximum} символов.")
     if not result["title"]:
@@ -180,6 +183,13 @@ def clean_task(payload, today, current=None):
         if parsed.strftime("%H:%M") != value:
             raise ValidationError("Время должно иметь формат HH:MM.")
     result["time"] = value
+    if result["recurrence"] in HOUR_INTERVALS:
+        end = result["repeat_until"] or max(value or "09:00", "21:00")
+        if not isinstance(end, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", end) or end < (value or "09:00"):
+            raise ValidationError("Конец повторений должен быть не раньше начала, в формате HH:MM.")
+        result["repeat_until"] = end
+    else:
+        result["repeat_until"] = None
     as_bool(result["reminder"], "reminder")
     if result["reminder"] and not value:
         raise ValidationError("Для напоминания укажи время.")
@@ -220,20 +230,24 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version > 3:
+            if version > 4:
                 raise RuntimeError("База создана более новой версией Ритма.")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(SCHEMA)
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(tasks)")}
             for name, definition in (("reminder_end_date", "TEXT"), ("event_date", "TEXT"),
-                                     ("escalation_days", "INTEGER NOT NULL DEFAULT 3")):
+                                     ("escalation_days", "INTEGER NOT NULL DEFAULT 3"), ("repeat_until", "TEXT")):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
             occurrence_columns = {row["name"] for row in connection.execute("PRAGMA table_info(occurrences)")}
-            for name in ("dismissed_at", "grace_notified_at"):
+            for name in ("dismissed_at", "grace_notified_at", "slots", "checks"):
                 if name not in occurrence_columns:
                     connection.execute(f"ALTER TABLE occurrences ADD COLUMN {name} TEXT")
-            connection.execute("PRAGMA user_version = 3")
+            for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
+                slots = checkin_plan(dict(row))
+                if slots:
+                    connection.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?", (json.dumps(slots), row["id"]))
+            connection.execute("PRAGMA user_version = 4")
             for key, value in DEFAULT_SETTINGS.items():
                 connection.execute(
                     "INSERT OR IGNORE INTO settings VALUES (?, ?)",
@@ -265,11 +279,17 @@ class Store:
                 connection.execute(
                     """INSERT OR IGNORE INTO occurrences
                     (task_id, date, title, notes, category, priority,
-                     time, reminder) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    time, reminder, slots, checks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')""",
                     (task["id"], day.isoformat(), task["title"], task["notes"],
                      task["category"], task["priority"], task["time"],
-                     task["reminder"]),
+                     task["reminder"], json.dumps(checkin_plan(dict(task))) if checkin_plan(dict(task)) else None),
                 )
+
+    def _init_checkins(self, connection):
+        for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
+            slots = checkin_plan(dict(row))
+            if slots:
+                connection.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?",(json.dumps(slots),row["id"]))
 
     def refresh(self):
         """Восстановить пропущенные дни после остановки и создать сегодня."""
@@ -379,6 +399,8 @@ class Store:
             for row in rows:
                 if row["date"] < today.isoformat():
                     continue  # Прошлый план остаётся в истории даже после переноса задачи.
+                if unpack(row)["checks"]:
+                    continue  # Уже отмеченные подходы дня сохраняют своё расписание.
                 status = (
                     "pending" if scheduled(task, parse_day(row["date"]))
                     else "cancelled"
@@ -400,6 +422,8 @@ class Store:
                         None if changed_time else row["snooze_until"], row["id"],
                     ),
                 )
+                slots = checkin_plan(task)
+                connection.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?", (json.dumps(slots) if slots else None, row["id"]))
             self._materialize(connection, today)
             self._materialize(connection, parse_day(task["start_date"]))
         return dict(task, reminder=bool(task["reminder"]))
@@ -440,6 +464,12 @@ class Store:
                 raise ValidationError("Сначала верни зачёркнутое дело в работу.")
             if parse_day(row["date"]) > now.date():
                 raise ValidationError("Будущие задачи пока нельзя выполнять.")
+            slots = unpack(row)["slots"]
+            if slots:
+                past = [value for value in slots if datetime.fromisoformat(row["date"]+"T"+value) <= now.replace(tzinfo=None)]
+                if not past:
+                    raise ValidationError("Первый подход ещё не наступил.")
+                return self._check(connection, occurrence_id, past[-1], completed)
             if row["status"] == ("done" if completed else "pending"):
                 return {"completed": completed, "id": occurrence_id}
             target_status = "done" if completed else "pending"
@@ -461,6 +491,34 @@ class Store:
                 (occurrence_id,),
             )
         return {"completed": completed, "id": occurrence_id}
+
+    def _check(self, connection, occurrence_id, slot, completed, when=None):
+        as_bool(completed,"completed")
+        row = connection.execute("SELECT * FROM occurrences WHERE id=?", (occurrence_id,)).fetchone()
+        if not row or row["status"] == "cancelled" or row["dismissed_at"]:
+            raise ValidationError("Сначала верни дело в работу.",409)
+        data = unpack(row)
+        if not data["slots"] or slot not in data["slots"]:
+            raise ValidationError("Такого подхода нет в расписании.")
+        now = self.clock()
+        if datetime.fromisoformat(row["date"]+"T"+slot) > now.replace(tzinfo=None):
+            raise ValidationError("Будущий подход пока нельзя отметить.")
+        checks = data["checks"]
+        if completed:
+            moment = when or now
+            if moment.tzinfo is None or moment > now + timedelta(minutes=5) or moment.replace(tzinfo=None) < datetime.fromisoformat(row["date"]+"T"+slot):
+                raise ValidationError("Некорректное время подхода.")
+            checks.setdefault(slot,moment.isoformat())
+        else:
+            checks.pop(slot,None)
+        done = len(checks) == len(data["slots"])
+        connection.execute("UPDATE occurrences SET checks=?,status=?,completed_at=?,snooze_until=NULL WHERE id=?",
+            (json.dumps(checks),"done" if done else "pending",max(checks.values()) if done else None,occurrence_id))
+        return {"id":occurrence_id,"time":slot,"completed":completed}
+
+    def check(self, occurrence_id, slot, completed=True):
+        with self.connection(write=True) as connection:
+            return self._check(connection,occurrence_id,slot,completed)
 
     def _dismiss(self, connection, occurrence_id, dismissed, when=None):
         as_bool(dismissed, "dismissed")
@@ -656,25 +714,7 @@ class Store:
                 "ORDER BY o.date DESC, o.time IS NULL, o.time, o.id",
                 (today.isoformat(),),
             ).fetchall()
-            counts = connection.execute(
-                "SELECT date, COUNT(*) AS total, "
-                "SUM(status='done') AS done FROM occurrences "
-                "WHERE status!='cancelled' GROUP BY date"
-            ).fetchall()
-            history = connection.execute(
-                "SELECT id,task_id,date,title,category,completed_at "
-                "FROM occurrences WHERE status='done' "
-                "ORDER BY completed_at DESC LIMIT 100"
-            ).fetchall()
-            completed_counts = connection.execute(
-                "SELECT substr(completed_at,1,10) AS date, COUNT(*) AS done "
-                "FROM occurrences WHERE status='done' GROUP BY 1"
-            ).fetchall()
-            missed_rows = connection.execute(
-                "SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o "
-                "JOIN tasks t ON t.id=o.task_id WHERE o.status!='cancelled' "
-                "AND (o.status='pending' OR substr(o.completed_at,1,10)>o.date)"
-            ).fetchall()
+            all_rows = connection.execute("SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o JOIN tasks t ON t.id=o.task_id").fetchall()
             notifications = connection.execute(
                 "SELECT n.*, CASE WHEN t.archived_date IS NOT NULL "
                 "AND o.status='pending' THEN 'cancelled' WHEN o.dismissed_at IS NOT NULL THEN 'dismissed' ELSE o.status "
@@ -686,12 +726,24 @@ class Store:
             seen = connection.execute(
                 "SELECT value FROM settings WHERE key='dictor_last_seen'"
             ).fetchone()
-        by_day = {row["date"]: dict(row) for row in counts}
-        completed_days = {row["date"]: row["done"] for row in completed_counts}
-        missed_days = {}
-        for row in missed_rows:
-            if missed_deadline(row):
-                missed_days[row["date"]] = missed_days.get(row["date"], 0) + 1
+        events = completion_events(all_rows)
+        history = events[:100]
+        by_day, completed_days, missed_days = {}, {}, {}
+        for row in all_rows:
+            data = decorate_checks(row,self.clock())
+            if row['status']=='cancelled' and not data['checks']:
+                continue
+            count = len(data['slots']) if data['slots'] else 1
+            done = len(data['checks']) if data['slots'] else int(row['status']=='done')
+            group = by_day.setdefault(row['date'],dict(date=row['date'],total=0,done=0))
+            group['total'] += count
+            group['done'] += done
+            missed = sum(item['status']=='missed' for item in data['checkins']) if data['slots'] else int(missed_deadline(row))
+            if row['status']=='cancelled': missed=0
+            missed_days[row['date']] = missed_days.get(row['date'],0) + missed
+        for event in events:
+            date = event['completed_at'][:10]
+            completed_days[date] = completed_days.get(date,0) + 1
         done_dates = {parse_day(key) for key in completed_days
                       if parse_day(key) <= today}
         current = today if today in done_dates else today - timedelta(days=1)
@@ -705,7 +757,7 @@ class Store:
             run = run + 1 if previous == active - timedelta(days=1) else 1
             longest = max(longest, run)
             previous = active
-        total_done = sum(item["done"] for item in by_day.values())
+        total_done = len(events)
         week = []
         for offset in range(7):
             key = (monday + timedelta(days=offset)).isoformat()
@@ -727,7 +779,9 @@ class Store:
                         "level": total_done // 10 + 1,
                         "active_days": len(done_dates), "streak": streak,
                         "longest_streak": longest},
-            "history": [dict(row) for row in history],
+            "history": [{key:row.get(key) for key in ('id','task_id','date','title','category','completed_at','slot_time')} for row in history],
+            "progress_events": [{key:row.get(key) for key in ('id','task_id','date','title','completed_at','slot_time')} for row in events],
+            "progress_facts": {"perfect_days":sum(item['total']>0 and item['done']==item['total'] for date,item in by_day.items() if date<=today.isoformat())},
             "notifications": [dict(row) for row in notifications],
             "settings": self.settings(),
             "dictor_last_seen": json.loads(seen[0]) if seen else None,
@@ -742,19 +796,18 @@ class Store:
             raise ValidationError("Выбери дату в пределах 10 лет.")
         self.refresh()
         with self.connection() as connection:
-            done = connection.execute(
-                "SELECT id,task_id,date,title,category,status,completed_at,dismissed_at FROM occurrences "
-                "WHERE status='done' AND substr(completed_at,1,10)=? ORDER BY completed_at,id",
-                (selected,),
-            ).fetchall()
-            unfinished = connection.execute(
-                "SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o JOIN tasks t ON t.id=o.task_id "
-                "WHERE o.date=? AND o.status!='cancelled' ORDER BY o.time IS NULL,o.time,o.id",
-                (selected,),
-            ).fetchall()
-        return {"date": selected, "is_past": day < today,
-                "done": [dict(row) for row in done],
-                "unfinished": [dict(row) for row in unfinished if missed_deadline(row)]}
+            all_rows = connection.execute("SELECT o.*,t.recurrence,t.start_date,t.reminder_end_date FROM occurrences o JOIN tasks t ON t.id=o.task_id").fetchall()
+        done = [event for event in completion_events(all_rows) if event['completed_at'][:10]==selected]
+        unfinished = []
+        for row in all_rows:
+            if row['date'] != selected or row['status']=='cancelled':
+                continue
+            data = decorate_checks(row,self.clock())
+            if data['slots']:
+                unfinished.extend(dict(data,title=data['title']+' · '+item['time'],slot_time=item['time']) for item in data['checkins'] if item['status']!='done')
+            elif missed_deadline(row):
+                unfinished.append(dict(row))
+        return {"date":selected,"is_past":day<today,"done":done,"unfinished":unfinished}
 
     def calendar(self, month):
         """Собрать шесть календарных недель с сохранёнными задачами."""
