@@ -81,7 +81,7 @@ const task_id = '11111111-1111-4111-8111-111111111111';
 let templates = [{id:task_id, title:'План', notes:'', category:'Личное', priority:'normal',
   start_date:'2026-10-20', recurrence:'once', time:null, reminder:false}];
 const current = {
-  version:'0.3.4', today:'2026-10-15', selected_date:'2026-10-15', server_time:'2026-10-15T12:00:00+03:00',
+  version:fs.readFileSync('ritm/__init__.py','utf8').match(/__version__ = "([^"]+)"/)[1], today:'2026-10-15', selected_date:'2026-10-15', server_time:'2026-10-15T12:00:00+03:00',
   tasks:[], history:[], notifications:[], has_tasks:true,
   week:Array.from({length:7}, (_, i) => ({date:`2026-10-${12+i}`, total:0, done:0})),
   activity:[{date:'2026-10-15', done:0}], runtime:{tray:false},
@@ -123,6 +123,13 @@ async function tick() { await Promise.resolve(); await Promise.resolve(); await 
 (async()=>{
   await run("load_state()");
   assert.equal(get('connectionError').hidden,true,get('connectionError').textContent);
+  const installedVersion=current.version;
+  current.version='0.0.0';
+  await run('load_state()');
+  assert.equal(get('connectionError').hidden,false);
+  current.version=installedVersion;
+  await run('load_state()');
+  assert.equal(get('connectionError').hidden,true);
   assert.equal(get('displayName').value,'Клио');
   assert.equal(get('appearanceForm').listeners.get('input').length,1);
   assert.ok(!ids.has('dictorStatus') && !ids.has('lastDictorCommand'));

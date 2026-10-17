@@ -1,9 +1,9 @@
-# Ритм 0.3.5
+# Ритм 0.3.6
 
-## Скачать Ритм 0.3.5
+## Скачать Ритм 0.3.6
 
-- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/raw/refs/heads/main/dist/Ritm.exe)
-- [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/raw/refs/heads/main/dist/Ritm-Android.apk)
+- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.3.6/Ritm.exe)
+- [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.3.6/Ritm-Android.apk)
 - [Автоматическое переподключение телефона к ноутбуку](UPDATE_0.3.5_RU.md)
 
 На Android устанавливай APK поверх предыдущей версии, без удаления приложения, чтобы сохранить данные и подключение.
