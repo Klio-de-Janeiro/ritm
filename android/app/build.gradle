@@ -1,0 +1,57 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ru.klio.ritm'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ru.klio.ritm'
+        minSdk 26
+        targetSdk 35
+        versionCode 7
+        versionName '0.3.5'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    // Постоянная локальная подпись позволяет ставить обновления поверх приложения.
+    signingConfigs {
+        personal {
+            storeFile file('../../.android-signing/ritm.jks')
+            storePassword 'ritm-personal'
+            keyAlias 'ritm'
+            keyPassword 'ritm-personal'
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; signingConfig signingConfigs.personal }
+    }
+    sourceSets {
+        main.assets.srcDirs += [layout.buildDirectory.dir('generated/ritmAssets').get().asFile]
+        main.res.srcDirs += [layout.buildDirectory.dir('generated/ritmRes').get().asFile]
+    }
+    lint { abortOnError true }
+}
+tasks.register('prepareRitmIcon') {
+    inputs.file('../../Ritm.png')
+    outputs.dir(layout.buildDirectory.dir('generated/ritmAssets'))
+    outputs.dir(layout.buildDirectory.dir('generated/ritmRes'))
+    doLast {
+        def source = javax.imageio.ImageIO.read(file('../../Ritm.png'))
+        if (source == null || Math.min(source.width, source.height) < 256) {
+            throw new GradleException('Ritm.png must be a PNG of at least 256x256 pixels.')
+        }
+        [192, 512].each { size ->
+            def image = new java.awt.image.BufferedImage(size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            def g = image.createGraphics()
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+            def scale = Math.min(size / (double)source.width, size / (double)source.height)
+            int w = (int)(source.width * scale), h = (int)(source.height * scale)
+            g.drawImage(source, (int)((size-w)/2), (int)((size-h)/2), w, h, null); g.dispose()
+            def destination = size == 192 ? layout.buildDirectory.file('generated/ritmRes/drawable-nodpi/ritm_icon.png').get().asFile : layout.buildDirectory.file('generated/ritmAssets/icon.png').get().asFile
+            destination.parentFile.mkdirs(); javax.imageio.ImageIO.write(image, 'png', destination)
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'prepareRitmIcon' }
+dependencies {
+    implementation 'androidx.work:work-runtime:2.9.1'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

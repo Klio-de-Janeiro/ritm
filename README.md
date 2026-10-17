@@ -1,4 +1,13 @@
-# Ритм 0.3.4
+# Ритм 0.3.5
+
+## Скачать Ритм 0.3.5
+
+- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/raw/refs/heads/main/dist/Ritm.exe)
+- [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/raw/refs/heads/main/dist/Ritm-Android.apk)
+- [Автоматическое переподключение телефона к ноутбуку](UPDATE_0.3.5_RU.md)
+
+На Android устанавливай APK поверх предыдущей версии, без удаления приложения, чтобы сохранить данные и подключение.
+
 
 Обновление 0.3.4: напоминания на один день по умолчанию, отдельный список
 невыполненных планов и подробная история по клеткам активности.
@@ -375,5 +384,3 @@ Windows PowerShell. Выполнение скриптов из файлов и �
 В Linux проверены ресурсы и преобразование изображения; нативное отображение
 значков, установка ярлыков и группировка панели задач требуют проверки Windows.
 Документация Windows: https://learn.microsoft.com/en-us/windows/win32/properties/props-system-appusermodel-id
-#   r i t m  
- 

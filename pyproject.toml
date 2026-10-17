@@ -1,0 +1,6 @@
+[project]
+name = "ritm-local"
+version = "0.3.4"
+description = "Локальные задачи, привычки и напоминания с API для Dictor"
+requires-python = ">=3.10"
+dependencies = []
