@@ -126,7 +126,7 @@ async function load_state() {
     state = result;
     selected_date = state.selected_date;
     calendar_month ??= state.today.slice(0, 7);
-    const older_backend = state.version !== "0.4.0";
+    const older_backend = state.version !== "0.4.1";
     $("#connectionError").hidden = !older_backend;
     if (older_backend) $("#connectionError").textContent = "Работает другая версия Ритма. Заверши приложение через настройки или трей и запусти обновлённый Ritm.exe.";
     render();
@@ -248,7 +248,7 @@ function render_task(task, is_future) {
   const dismissed = Boolean(task.dismissed_at);
   const interval = !!task.checkins?.length;
   const dismiss_action = !done && (dismissed || task.can_dismiss) ? `<button class="button subtle dismiss-task" data-dismiss="${task.id}" data-dismissed="${!dismissed}">${dismissed ? "Вернуть" : "Зачеркнуть"}</button>` : "";
-  const grace_label = task.in_grace ? `<span class="grace-label">Продлено до ${new Date(task.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span>` : dismissed ? '<span class="grace-label">Зачёркнуто · без XP</span>' : "";
+  const grace_label = task.in_grace ? `<span class="grace-label">Продлено до ${new Date(task.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span>` : dismissed ? '<span class="grace-label">Зачёркнуто · −5 XP</span>' : "";
   const reminder_end = task.reminder_end_date || (task.recurrence === "once" ? task.date : null);
   const reminder_expired = (reminder_end && reminder_end < state.today) || (task.recurrence === "once" && task.start_date && task.date !== task.start_date);
   const reminder_active = task.reminder && !reminder_expired;
@@ -286,9 +286,9 @@ function render_progress() {
     ["Сделано тобой", summary.done, "check", "#64d9b5", "За всё время"],
     ["Серия", summary.streak, "flame", "#f0bb81", "Дней с выполненными задачами"],
     ["Лучшая серия", summary.longest_streak, "bolt", "#79bfff", "Дней подряд"],
-    ["Твой уровень", String(summary.level).padStart(2, "0"), "spark", "#b1a3ff", `${summary.xp} XP · по 10 за выполнение`],
+    ["Твой уровень", String(summary.level).padStart(2, "0"), "spark", "#b1a3ff", `${summary.xp} XP · +10 за выполнение, −5 за зачёркивание`],
   ];
-  $("#progressStats").innerHTML = stats.map(([title, value, symbol, color, caption], index) => `<div class="panel progress-stat" style="--stat-color:${color}"><div class="stat-top"><span>${title}</span>${icon(symbol)}</div><p class="stat-number">${value}</p><p class="stat-caption">${caption}</p>${index === 3 ? `<div class="level-track"><div style="width:${summary.xp % 100}%"></div></div>` : ""}</div>`).join("");
+  $("#progressStats").innerHTML = stats.map(([title, value, symbol, color, caption], index) => `<div class="panel progress-stat" style="--stat-color:${color}"><div class="stat-top"><span>${title}</span>${icon(symbol)}</div><p class="stat-number">${value}</p><p class="stat-caption">${caption}</p>${index === 3 ? `<div class="level-track"><div style="width:${Math.max(0,summary.xp) % 100}%"></div></div>` : ""}</div>`).join("");
   const cells = [...state.activity];
   const start_weekday = (as_date(cells[0].date).getDay() + 6) % 7;
   const padding = Array.from({length: start_weekday}, () => '<span aria-hidden="true"></span>').join("");
@@ -445,6 +445,7 @@ async function open_task(task_id = null) {
     $("#taskRecurrence").value = task?.recurrence || "once";
     $("#taskTime").value = task ? (task.time || "") : "09:00";
     $("#taskRepeatUntil").value=task?.repeat_until || "21:00";
+    $("#taskCheckins").checked=Boolean(task?.checkins_enabled);
     $("#taskReminderEnd").value = task ? (task.reminder_end_date || (task.recurrence === "once" ? task.start_date : "")) : $("#taskDate").value;
     editor_day = $("#taskDate").value;
     $("#taskEventDate").value = task?.event_date || "";
@@ -527,6 +528,7 @@ document.addEventListener("click", async event => {
       button.disabled = true;
       await api(`/occurrences/${button.dataset.dismiss}/dismiss`, "POST", {dismissed:button.dataset.dismissed === "true"});
       await load_state();
+      toast(button.dataset.dismissed === "true" ? "Дело зачёркнуто. −5 XP" : "Дело возвращено. +5 XP");
     } catch (error) { toast(error.message,true); }
     finally { button.disabled = false; }
   }
@@ -593,7 +595,8 @@ $("#taskForm").addEventListener("submit", async event => {
     reminder_end_date: $("#taskReminderEnd").value || null,
     event_date: $("#taskRecurrence").value === "event" ? ($("#taskEventDate").value || null) : null,
     escalation_days: Number($("#taskEscalationDays").value),
-    repeat_until: $("#taskRepeatUntil").value || null,
+    repeat_until: $("#taskCheckins").checked ? ($("#taskRepeatUntil").value || null) : null,
+    checkins_enabled: $("#taskCheckins").checked,
     time: $("#taskTime").value || null, notes: $("#taskNotes").value,
   };
   try {
@@ -805,7 +808,10 @@ poll_timer = setInterval(() => {
 
 function update_reminder_fields() {
   const mode = $("#taskRecurrence").value;
-  $("#taskRepeatFields").hidden=!/^(hourly|every_\d+_hours)$/.test(mode);
+  const hourly = /^(hourly|every_\d+_hours)$/.test(mode);
+  $("#taskRepeatFields").hidden=!hourly;
+  if (!hourly) $("#taskCheckins").checked=false;
+  $("#taskCheckinTimes").hidden=!hourly || !$("#taskCheckins").checked;
   const fixed = mode === "event" || mode === "three_times_daily";
   $("#taskEventFields").hidden = mode !== "event";
   $("#taskEventDate").required = mode === "event";
@@ -816,6 +822,7 @@ function update_reminder_fields() {
   if (fixed) { $("#taskTime").value = "09:00"; $("#taskReminder").checked = true; }
   $("#taskTime").required = $("#taskReminder").checked;
 }
+$("#taskCheckins").addEventListener("change", update_reminder_fields);
 $("#taskDate").addEventListener("change", () => {
   if ($("#taskRecurrence").value === "once" && (!$("#taskReminderEnd").value || $("#taskReminderEnd").value === editor_day)) $("#taskReminderEnd").value = $("#taskDate").value;
   editor_day = $("#taskDate").value;

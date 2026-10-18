@@ -101,6 +101,18 @@ for(const name of ['awards.js','progress.js']) run(fs.readFileSync(path.join(__d
 run(fs.readFileSync(path.join(root,'appearance.js'),'utf8'));
 run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
 (async()=>{
+  get('taskRecurrence').value='every_3_hours';
+  run('updateReminderFields()');
+  assert.equal(get('taskCheckins').checked,false);
+  assert.equal(get('taskRepeatFields').hidden,false);
+  assert.equal(get('taskCheckinTimes').hidden,true);
+  get('taskCheckins').checked=true;
+  run('updateReminderFields()');
+  assert.equal(get('taskCheckinTimes').hidden,false);
+  get('taskRecurrence').value='once';
+  run('updateReminderFields()');
+  assert.equal(get('taskCheckins').checked,false);
+
   assert.equal(run('phoneAppearance(state.settings).background_color'),'#120a25');
   assert.equal(run('phoneAppearance(state.settings).palette_hue'),270);
   run("previewAppearance({border_radius:0,glow_color:'#ff0000',neon_intensity:100})");
@@ -140,8 +152,11 @@ run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
   run('refresh(true)');
   assert.match(get('unfinishedList').innerHTML,/data-dismiss="late"/);
   await document.fire('click',new Element('button',{'data-dismiss':'late','data-date':'2026-10-01','data-dismissed':'true'}));
-  assert.match(get('unfinishedList').innerHTML,/is-dismissed/);
-  assert.match(get('unfinishedList').innerHTML,/Вернуть/);
+  assert.doesNotMatch(get('unfinishedList').innerHTML,/is-dismissed/);
+  run('day=today();refresh(true)');
+  assert.match(get('taskList').innerHTML,/is-dismissed/);
+  assert.match(get('taskList').innerHTML,/Вернуть/);
+  assert.match(get('taskList').innerHTML,/−5 XP/);
   await document.fire('click',new Element('button',{'data-dismiss':'late','data-date':'2026-10-01','data-dismissed':'false'}));
   assert.equal(data.occurrences.find(row=>row.task_id==='late').dismissed_at,null);
   console.log('Mobile: legacy colors, preview during polling, save/cancel, light theme, calendar alignment, scroll and escaped history OK.');

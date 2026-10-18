@@ -23,7 +23,7 @@ class IntervalTests(unittest.TestCase):
     def create(self, recurrence):
         """Задать начало отсчёта в 09:00 первого дня."""
         return self.store.create_task({"title": recurrence, "time": "09:00",
-                                       "reminder": True, "recurrence": recurrence})
+                                       "reminder": True, "recurrence": recurrence, "checkins_enabled": True})
 
     def test_each_hour_interval_notifies_once_per_slot(self):
         """Все пять часовых вариантов доходят до своего следующего слота."""

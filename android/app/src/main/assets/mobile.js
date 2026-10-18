@@ -16,7 +16,7 @@ function protect(action) {try {return action();} catch(error) {toast(error.messa
 function rowHtml(row) {
   if(row.slot_time) return `<article class="task done"><div></div><div><p class="title">${esc(row.title)} · ${row.slot_time}</p><small>${esc(row.completed_at.slice(0,10))} · +10 XP</small><button class="edit" data-check-slot="${row.slot_time}" data-slot-task="${esc(row.task_id)}" data-slot-date="${row.date}" data-slot-completed="false">Отменить подход</button></div></article>`;
   const task=state.tasks.find(t=>t.id===row.task_id),done=row.status==="done",future=row.date>today(),dismissed=!!row.dismissed_at;
-  return `<article class="task ${done?"done":""} ${dismissed?"is-dismissed":""}"><button class="check" data-check="${esc(row.task_id)}" data-date="${esc(row.date)}" data-done="${done}" aria-label="${done?"Отменить выполнение":"Выполнить"}: ${esc(row.title)}" ${future||dismissed||row.checkins?.length?"disabled":""}>${done?"✓":"○"}</button><div><p class="title">${esc(row.title)}</p><div class="meta">${esc(row.time?(/^(hourly|every_\d+_hours)$/.test(task?.recurrence)?"С ":"")+row.time:"Без времени")} · ${esc(row.category)}${row.priority==="high"?" · Важное":""}<br>${row.in_grace?`<span class="grace-label">Продлено до ${new Date(row.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span> · `:""}${dismissed?"Зачёркнуто · без XP · ":""}${esc(recurrence[task?.recurrence]||"")}${row.date!==day||page==="progress"?" · "+esc(row.date):""}</div>${RitmProgress.checks(row,true)}${row.notes?`<p class="note">${esc(row.notes)}</p>`:""}${!done&&(dismissed||row.can_dismiss)?`<button class="edit dismiss-task" data-dismiss="${esc(row.task_id)}" data-date="${esc(row.date)}" data-dismissed="${!dismissed}">${dismissed?"Вернуть":"Зачеркнуть"}</button>`:""}${task&&!task.archived_date?`<button class="edit" data-edit="${esc(task.id)}">Изменить</button>`:""}</div></article>`;
+  return `<article class="task ${done?"done":""} ${dismissed?"is-dismissed":""}"><button class="check" data-check="${esc(row.task_id)}" data-date="${esc(row.date)}" data-done="${done}" aria-label="${done?"Отменить выполнение":"Выполнить"}: ${esc(row.title)}" ${future||dismissed||row.checkins?.length?"disabled":""}>${done?"✓":"○"}</button><div><p class="title">${esc(row.title)}</p><div class="meta">${esc(row.time?(/^(hourly|every_\d+_hours)$/.test(task?.recurrence)?"С ":"")+row.time:"Без времени")} · ${esc(row.category)}${row.priority==="high"?" · Важное":""}<br>${row.in_grace?`<span class="grace-label">Продлено до ${new Date(row.grace_until).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</span> · `:""}${dismissed?"Зачёркнуто · −5 XP · ":""}${esc(recurrence[task?.recurrence]||"")}${row.date!==day||page==="progress"?" · "+esc(row.date):""}</div>${RitmProgress.checks(row,true)}${row.notes?`<p class="note">${esc(row.notes)}</p>`:""}${!done&&(dismissed||row.can_dismiss)?`<button class="edit dismiss-task" data-dismiss="${esc(row.task_id)}" data-date="${esc(row.date)}" data-dismissed="${!dismissed}">${dismissed?"Вернуть":"Зачеркнуть"}</button>`:""}${task&&!task.archived_date?`<button class="edit" data-edit="${esc(task.id)}">Изменить</button>`:""}</div></article>`;
 }
 let awardFilter="all",awardExpanded=false;
 let activitySignature="";
@@ -61,7 +61,7 @@ function render() {
   $("#syncBadge").textContent=state.pending_count?`В очереди: ${state.pending_count}`:state.connected?"Синхронизация":"Офлайн";
   const date=new Date(day+"T12:00:00"),label=date.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"});
   $("#dayLabel").textContent=label[0].toUpperCase()+label.slice(1);$("#selectedDay").value=day;
-  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&(row.date===day||(day===today()&&row.in_grace)));
+  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&(row.date===day||(day===today()&&(row.in_grace||row.dismissed_at&&row.date<today()))));
   const done=rows.filter(row=>row.status==="done").length;
   $("#dailyCount").textContent=`${done} / ${rows.length}`;$("#dailyProgress").max=Math.max(1,rows.length);$("#dailyProgress").value=done;
   const visible=rows.filter(row=>filter==="all"||row.status===filter).sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
@@ -69,8 +69,8 @@ function render() {
   const history=RitmProgress.events(state.occurrences);
   $("#awardsMobile").innerHTML=RitmProgress.html(RitmProgress.awards(history,state.occurrences,today()),awardFilter,awardExpanded);
   const days=new Set(history.map(row=>(row.completed_at||row.date).slice(0,10)));
-  $("#progressStats").innerHTML=`<div class="stat"><strong>${history.length*10}</strong><span>Очков опыта</span></div><div class="stat"><strong>${days.size}</strong><span>Дней с победами</span></div>`;
-  const missed=state.occurrences.filter(row=>row.status==="pending"&&row.date<today()).sort((a,b)=>b.date.localeCompare(a.date));
+  $("#progressStats").innerHTML=`<div class="stat"><strong>${RitmProgress.xp(state.occurrences)}</strong><span>XP · +10 выполнено / −5 зачёркнуто</span></div><div class="stat"><strong>${days.size}</strong><span>Дней с победами</span></div>`;
+  const missed=state.occurrences.filter(row=>row.status==="pending"&&!row.dismissed_at&&row.date<today()).sort((a,b)=>b.date.localeCompare(a.date));
   $("#unfinishedList").innerHTML=missed.length?missed.map(rowHtml).join(""):'<p class="muted">Пропущенных дел пока нет.</p>';
   $("#reviewDate").max=today();$("#reviewDate").value=reviewDay;
   renderActivity(history);renderDayReview();
@@ -96,6 +96,7 @@ function editTask(id=null) {
   $("#taskDate").value=task.start_date||(day<today()?today():day);
   $("#taskDate").min=task.start_date&&task.start_date<today()?task.start_date:today();
   $("#taskRepeatUntil").value=task.repeat_until||"21:00";
+  $("#taskCheckins").checked=!!task.checkins_enabled;
   $("#taskTime").value=id?(task.time||""):"09:00";$("#taskReminderEnd").value=id?(task.reminder_end_date||(task.recurrence==="once"?task.start_date:"")):$("#taskDate").value;editorDay=$("#taskDate").value;$("#taskEventDate").value=task.event_date||"";$("#taskEscalationDays").value=task.escalation_days??3;$("#taskReminder").checked=!!task.reminder;$("#taskTime").required=!!task.reminder;
   $("#taskCategory").value=task.category||"Личное";$("#taskPriority").value=task.priority||"normal";$("#taskRecurrence").value=task.recurrence||"once";
   updateReminderFields();$("#archiveTask").hidden=!id;$("#editorError").textContent="";$("#taskDialog").showModal();
@@ -119,7 +120,7 @@ document.addEventListener("click",event=>{
 $("#addTask").onclick=()=>protect(()=>editTask());$("#closeEditor").onclick=()=>$("#taskDialog").close();
 $("#taskForm").onsubmit=event=>{
   event.preventDefault();try {
-    const values={repeat_until:$("#taskRepeatUntil").value||null,title:$("#taskTitle").value,notes:$("#taskNotes").value,start_date:$("#taskDate").value,time:$("#taskTime").value||null,reminder:$("#taskReminder").checked,category:$("#taskCategory").value,priority:$("#taskPriority").value,recurrence:$("#taskRecurrence").value,reminder_end_date:$("#taskReminderEnd").value||null,event_date:$("#taskRecurrence").value==="event"?($("#taskEventDate").value||null):null,escalation_days:Number($("#taskEscalationDays").value)};
+    const values={checkins_enabled:$("#taskCheckins").checked,repeat_until:$("#taskCheckins").checked?($("#taskRepeatUntil").value||null):null,title:$("#taskTitle").value,notes:$("#taskNotes").value,start_date:$("#taskDate").value,time:$("#taskTime").value||null,reminder:$("#taskReminder").checked,category:$("#taskCategory").value,priority:$("#taskPriority").value,recurrence:$("#taskRecurrence").value,reminder_end_date:$("#taskReminderEnd").value||null,event_date:$("#taskRecurrence").value==="event"?($("#taskEventDate").value||null):null,escalation_days:Number($("#taskEscalationDays").value)};
     call("mutate",{command:{kind:editing?"edit":"create",task_id:editing,values}});$("#taskDialog").close();refresh();toast("Сохранено на телефоне.");
   }catch(error){$("#editorError").textContent=error.message;}
 };
@@ -144,7 +145,10 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden){refresh(t
 refresh(true);setInterval(()=>{if(!document.hidden)refresh();},3000);setInterval(()=>{if(!document.hidden)protect(()=>call("sync"));},30000);
 
 function updateReminderFields() {
-  $("#taskRepeatFields").hidden=!/^(hourly|every_\d+_hours)$/.test($("#taskRecurrence").value);
+  const hourly=/^(hourly|every_\d+_hours)$/.test($("#taskRecurrence").value);
+  $("#taskRepeatFields").hidden=!hourly;
+  if(!hourly) $("#taskCheckins").checked=false;
+  $("#taskCheckinTimes").hidden=!hourly||!$("#taskCheckins").checked;
   const mode=$("#taskRecurrence").value,fixed=mode==="event"||mode==="three_times_daily";
   $("#taskEventFields").hidden=mode!=="event";$("#taskEventDate").required=mode==="event";
   $("#taskFixedTimes").hidden=mode!=="three_times_daily";$("#taskTime").disabled=fixed;$("#taskReminder").disabled=fixed;
@@ -153,6 +157,7 @@ function updateReminderFields() {
 }
 $("#reviewDate").onchange=()=>{if($("#reviewDate").value){reviewDay=$("#reviewDate").value;renderActivity(state.occurrences.filter(row=>row.status==="done"));renderDayReview();}};
 $("#taskDate").onchange=()=>{if($("#taskRecurrence").value==="once"&&(!$("#taskReminderEnd").value||$("#taskReminderEnd").value===editorDay))$("#taskReminderEnd").value=$("#taskDate").value;editorDay=$("#taskDate").value;};
+$("#taskCheckins").onchange=updateReminderFields;
 $("#taskRecurrence").onchange=()=>{if($("#taskRecurrence").value==="once"&&!$("#taskReminderEnd").value)$("#taskReminderEnd").value=$("#taskDate").value;if($("#taskRecurrence").value!=="once"&&$("#taskReminderEnd").value===$("#taskDate").value)$("#taskReminderEnd").value="";if(/^(hourly|every_\d+_hours)$/.test($("#taskRecurrence").value)){$("#taskReminder").checked=true;if(!$("#taskTime").value)$("#taskTime").value="09:00";}updateReminderFields();};
 $("#taskReminder").onchange=()=>{$("#taskTime").required=$("#taskReminder").checked;if($("#taskReminder").checked&&!$("#taskTime").value)$("#taskTime").value="09:00";};
 

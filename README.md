@@ -1,12 +1,17 @@
-# Ритм 0.4.0
+# Ритм 0.4.1
 
-## Скачать Ритм 0.4.0
+## Скачать Ритм 0.4.1
 
-- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.0/Ritm.exe)
-- [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.0/Ritm-Android.apk)
+- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.1/Ritm.exe)
+- [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.1/Ritm-Android.apk)
 - [Автоматическое переподключение телефона к ноутбуку](UPDATE_0.3.5_RU.md)
 
 На Android устанавливай APK поверх предыдущей версии, без удаления приложения, чтобы сохранить данные и подключение.
+
+Обновление 0.4.1: отдельные отметки подходов включаются для каждой задачи вручную;
+обычные дела выполняются один раз. Зачёркнутые дела остаются в общем списке
+и дают −5 XP; отмена зачёркивания возвращает очки.
+Описание: **[UPDATE_0.4.1_RU.md](UPDATE_0.4.1_RU.md)**.
 
 
 Обновление 0.3.4: напоминания на один день по умолчанию, отдельный список

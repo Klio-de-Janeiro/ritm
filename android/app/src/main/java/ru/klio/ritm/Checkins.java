@@ -5,7 +5,7 @@ import java.time.*;
 final class Checkins {
     static JSONArray plan(JSONObject task) throws Exception {
         int hours=Model.hourInterval(task.getString("recurrence"));
-        if(hours==0 || task.isNull("time")) return null;
+        if(!task.optBoolean("checkins_enabled",false) || hours==0 || task.isNull("time")) return null;
         LocalTime start=LocalTime.parse(task.getString("time"));
         String end=task.isNull("repeat_until")?(start.isAfter(LocalTime.of(21,0))?start.toString():"21:00"):task.getString("repeat_until");
         JSONArray result=new JSONArray();

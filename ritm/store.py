@@ -109,7 +109,7 @@ def clean_task(payload, today, current=None):
         raise ValidationError("Ожидается JSON-объект задачи.")
     fields = {
         "title", "notes", "category", "priority", "recurrence",
-        "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until",
+        "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until", "checkins_enabled",
     }
     if set(payload) - fields:
         raise ValidationError("В задаче есть неизвестные поля.")
@@ -117,11 +117,12 @@ def clean_task(payload, today, current=None):
         "title": "", "notes": "", "category": "Личное",
         "priority": "normal", "recurrence": "once",
         "start_date": today.isoformat(), "time": None, "reminder": False,
-        "reminder_end_date": None, "event_date": None, "escalation_days": 3, "repeat_until": None,
+        "reminder_end_date": None, "event_date": None, "escalation_days": 3, "repeat_until": None, "checkins_enabled": False,
     }
     if current:
         result.update({key: current[key] for key in fields})
         result["reminder"] = bool(result["reminder"])
+        result["checkins_enabled"] = bool(result["checkins_enabled"])
     result.update(payload)
     if current and "recurrence" in payload and "reminder_end_date" not in payload:
         if current["recurrence"] == "once" and result["recurrence"] != "once" and current["reminder_end_date"] == current["start_date"]:
@@ -183,7 +184,10 @@ def clean_task(payload, today, current=None):
         if parsed.strftime("%H:%M") != value:
             raise ValidationError("Время должно иметь формат HH:MM.")
     result["time"] = value
-    if result["recurrence"] in HOUR_INTERVALS:
+    as_bool(result["checkins_enabled"], "checkins_enabled")
+    if result["recurrence"] not in HOUR_INTERVALS:
+        result["checkins_enabled"] = False
+    if result["checkins_enabled"]:
         end = result["repeat_until"] or max(value or "09:00", "21:00")
         if not isinstance(end, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", end) or end < (value or "09:00"):
             raise ValidationError("Конец повторений должен быть не раньше начала, в формате HH:MM.")
@@ -230,24 +234,29 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version > 4:
+            if version > 5:
                 raise RuntimeError("База создана более новой версией Ритма.")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(SCHEMA)
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(tasks)")}
             for name, definition in (("reminder_end_date", "TEXT"), ("event_date", "TEXT"),
-                                     ("escalation_days", "INTEGER NOT NULL DEFAULT 3"), ("repeat_until", "TEXT")):
+                                     ("escalation_days", "INTEGER NOT NULL DEFAULT 3"), ("repeat_until", "TEXT"),
+                                     ("checkins_enabled", "INTEGER NOT NULL DEFAULT 0")):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
             occurrence_columns = {row["name"] for row in connection.execute("PRAGMA table_info(occurrences)")}
             for name in ("dismissed_at", "grace_notified_at", "slots", "checks"):
                 if name not in occurrence_columns:
                     connection.execute(f"ALTER TABLE occurrences ADD COLUMN {name} TEXT")
-            for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
+            if "checkins_enabled" not in columns:
+                # Сохраняем уже записанные подходы; пустые планы становятся обычными делами.
+                connection.execute("UPDATE tasks SET checkins_enabled=1 WHERE id IN (SELECT task_id FROM occurrences WHERE checks IS NOT NULL AND checks!='{}')")
+                connection.execute("UPDATE occurrences SET slots=NULL WHERE status='pending' AND (checks IS NULL OR checks='{}') AND task_id IN (SELECT id FROM tasks WHERE checkins_enabled=0)")
+            for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until,t.checkins_enabled FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
                 slots = checkin_plan(dict(row))
                 if slots:
                     connection.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?", (json.dumps(slots), row["id"]))
-            connection.execute("PRAGMA user_version = 4")
+            connection.execute("PRAGMA user_version = 5")
             for key, value in DEFAULT_SETTINGS.items():
                 connection.execute(
                     "INSERT OR IGNORE INTO settings VALUES (?, ?)",
@@ -286,7 +295,7 @@ class Store:
                 )
 
     def _init_checkins(self, connection):
-        for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
+        for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until,t.checkins_enabled FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
             slots = checkin_plan(dict(row))
             if slots:
                 connection.execute("UPDATE occurrences SET slots=?,checks='{}' WHERE id=?",(json.dumps(slots),row["id"]))
@@ -365,7 +374,7 @@ class Store:
                 "SELECT * FROM tasks WHERE archived_date IS NULL "
                 "ORDER BY created_at DESC"
             ).fetchall()
-        return [dict(row, reminder=bool(row["reminder"])) for row in rows]
+        return [dict(row, reminder=bool(row["reminder"]), checkins_enabled=bool(row["checkins_enabled"])) for row in rows]
 
     def update_task(self, task_id, payload):
         """Обновить будущие ожидания и просроченную разовую задачу."""
@@ -382,7 +391,7 @@ class Store:
             task.update(clean_task(payload, today, task))
             fields = (
                 "title", "notes", "category", "priority", "recurrence",
-                "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days",
+                "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until", "checkins_enabled",
             )
             assignments = ", ".join('"' + key + '" = ?' for key in fields)
             connection.execute(
@@ -412,6 +421,8 @@ class Store:
                     or task["start_date"] != current["start_date"]
                     or task["event_date"] != current["event_date"]
                     or task["escalation_days"] != current["escalation_days"]
+                    or task["checkins_enabled"] != bool(current["checkins_enabled"])
+                    or task["repeat_until"] != current["repeat_until"]
                 )
                 connection.execute(
                     "UPDATE occurrences SET title=?, notes=?, category=?, "
@@ -758,6 +769,8 @@ class Store:
             longest = max(longest, run)
             previous = active
         total_done = len(events)
+        dismissed_count = sum(bool(row['dismissed_at']) for row in all_rows)
+        xp = total_done * 10 - dismissed_count * 5
         week = []
         for offset in range(7):
             key = (monday + timedelta(days=offset)).isoformat()
@@ -772,11 +785,11 @@ class Store:
             "server_time": self.clock().isoformat(),
             "tasks": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in rows] + (
                 [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished
-                 if occurrence_state(row, self.clock())["in_grace"]] if day == today else []),
-            "unfinished": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished],
+                 if occurrence_state(row, self.clock())["in_grace"] or row["dismissed_at"]] if day == today else []),
+            "unfinished": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished if not row["dismissed_at"]],
             "week": week, "activity": activity,
-            "summary": {"done": total_done, "xp": total_done * 10,
-                        "level": total_done // 10 + 1,
+            "summary": {"done": total_done, "xp": xp, "dismissed": dismissed_count,
+                        "level": max(1, xp // 100 + 1),
                         "active_days": len(done_dates), "streak": streak,
                         "longest_streak": longest},
             "history": [{key:row.get(key) for key in ('id','task_id','date','title','category','completed_at','slot_time')} for row in history],

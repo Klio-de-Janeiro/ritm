@@ -90,13 +90,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request("POST", path, {})["status"],409)
         now += timedelta(hours=5)
         self.assertIsNotNone(self.request("POST", path, {})["body"]["dismissed_at"])
-        self.assertEqual(self.store.state(now.date().isoformat())["summary"]["xp"],0)
+        self.assertEqual(self.store.state(now.date().isoformat())["summary"]["xp"],-5)
         self.assertIsNone(self.request("POST", path, {"dismissed":False})["body"]["dismissed_at"])
 
     def test_checkin_endpoint_updates_only_the_selected_slot(self):
         now=datetime.now().astimezone().replace(hour=12,minute=0,second=0,microsecond=0)
         self.store.clock=lambda:now
-        self.store.create_task(dict(title="Спорт",time="09:00",recurrence="every_3_hours",reminder=True))
+        self.store.create_task(dict(title="Спорт",time="09:00",recurrence="every_3_hours",reminder=True,checkins_enabled=True))
         row=self.store.state(now.date().isoformat())["tasks"][0]
         path=f"/api/v1/occurrences/{row['id']}/check"
         self.assertEqual(self.request("POST",path,{"time":"09:00"},auth=False)["status"],401)

@@ -7,7 +7,7 @@ from .config import HOUR_INTERVALS
 
 def plan(task):
     hours = HOUR_INTERVALS.get(task["recurrence"])
-    if not hours or not task["time"]:
+    if not task.get("checkins_enabled", False) or not hours or not task["time"]:
         return None
     start = task["time"]
     end = task.get("repeat_until") or max(start, "21:00")

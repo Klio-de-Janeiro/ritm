@@ -13,7 +13,7 @@ class CheckinTests(unittest.TestCase):
         self.now=datetime(2026,10,18,9,tzinfo=timezone(timedelta(hours=3)))
         self.path=Path(self.temp.name)/'tasks.sqlite3'
         self.store=Store(self.path,clock=lambda:self.now)
-        self.task=self.store.create_task(dict(title='спорт',time='09:00',reminder=True,recurrence='every_3_hours'))
+        self.task=self.store.create_task(dict(title='спорт',time='09:00',reminder=True,recurrence='every_3_hours',checkins_enabled=True))
         self.row=self.store.state('2026-10-18')['tasks'][0]
 
     def test_missed_check_can_be_corrected_without_duplicating_xp(self):
@@ -83,3 +83,64 @@ class CheckinTests(unittest.TestCase):
         snapshot=SyncEngine(self.store,'laptop').exchange(dict(protocol=2,operations=[]))
         self.assertEqual(snapshot['occurrences'][0]['status'],'cancelled')
         self.assertIn('09:00',snapshot['occurrences'][0]['checks'])
+
+    def test_hourly_homework_is_single_completion_until_explicitly_enabled(self):
+        task=self.store.create_task(dict(title='Homework',time='09:00',reminder=True,recurrence='hourly'))
+        row=next(row for row in self.store.state('2026-10-18')['tasks'] if row['task_id']==task['id'])
+        self.assertFalse(task['checkins_enabled'])
+        self.assertEqual(row['checkins'],[])
+        self.store.complete(row['id'])
+        self.assertEqual(self.store.state('2026-10-18')['summary']['xp'],10)
+        self.now=self.now.replace(hour=12)
+        self.assertFalse(any(n['occurrence_id']==row['id'] for n in self.store.due_notifications()))
+
+    def test_switch_is_persisted_and_changes_only_unmarked_plans(self):
+        self.store.update_task(self.task['id'],dict(checkins_enabled=False))
+        self.assertEqual(self.store.state('2026-10-18')['tasks'][0]['checkins'],[])
+        self.assertFalse(self.store.list_tasks()[0]['checkins_enabled'])
+        self.store.update_task(self.task['id'],dict(checkins_enabled=True,repeat_until='18:00'))
+        restarted=Store(self.path,clock=lambda:self.now)
+        self.assertEqual(restarted.list_tasks()[0]['repeat_until'],'18:00')
+        self.assertEqual(restarted.state('2026-10-18')['tasks'][0]['slots'],['09:00','12:00','15:00','18:00'])
+        restarted.check(self.row['id'],'09:00')
+        restarted.update_task(self.task['id'],dict(checkins_enabled=False))
+        self.assertEqual(restarted.state('2026-10-18')['summary']['xp'],10)
+        self.now+=timedelta(days=1)
+        self.assertEqual(restarted.state('2026-10-19')['tasks'][0]['checkins'],[])
+
+    def test_switch_syncs_and_non_hourly_tasks_always_have_single_completion(self):
+        engine=SyncEngine(self.store,'laptop')
+        op=dict(id=str(uuid.uuid4()),kind='edit',task_id=self.task['id'],values={'checkins_enabled':False},before={'checkins_enabled':True})
+        result=engine.exchange(dict(protocol=2,operations=[op]))
+        self.assertEqual(result['accepted'],[op['id']])
+        self.assertIs(result['tasks'][0]['checkins_enabled'],False)
+        self.assertIsNone(result['occurrences'][0]['slots'])
+        task=self.store.create_task(dict(title='Homework',checkins_enabled=True))
+        self.assertFalse(task['checkins_enabled'])
+        with self.assertRaises(ValidationError):self.store.update_task(task['id'],dict(checkins_enabled='true'))
+
+    def test_upgrade_removes_empty_automatic_slots_and_preserves_recorded_units(self):
+        with self.store.connection(write=True) as db:
+            db.execute('ALTER TABLE tasks DROP COLUMN checkins_enabled')
+            db.execute('PRAGMA user_version=4')
+        migrated=Store(self.path,clock=lambda:self.now)
+        self.assertFalse(migrated.list_tasks()[0]['checkins_enabled'])
+        self.assertEqual(migrated.state('2026-10-18')['tasks'][0]['checkins'],[])
+        migrated.update_task(self.task['id'],dict(checkins_enabled=True))
+        migrated.check(self.row['id'],'09:00')
+        with migrated.connection(write=True) as db:
+            db.execute('ALTER TABLE tasks DROP COLUMN checkins_enabled')
+            db.execute('PRAGMA user_version=4')
+        migrated=Store(self.path,clock=lambda:self.now)
+        self.assertTrue(migrated.list_tasks()[0]['checkins_enabled'])
+        self.assertEqual(migrated.state('2026-10-18')['summary']['xp'],10)
+
+    def test_partial_day_is_penalized_once_not_for_every_missed_slot(self):
+        self.now=self.now.replace(hour=12)
+        self.store.check(self.row['id'],'09:00')
+        self.store.check(self.row['id'],'12:00')
+        self.now+=timedelta(days=1)
+        self.store.dismiss(self.row['id'])
+        self.assertEqual(self.store.state('2026-10-19')['summary']['xp'],15)
+        self.store.dismiss(self.row['id'],False)
+        self.assertEqual(self.store.state('2026-10-19')['summary']['xp'],20)

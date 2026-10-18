@@ -8,7 +8,7 @@ import java.util.*;
 
 /** Чистая модель: снимок ноутбука + долговечная очередь локальных операций. */
 public final class Model {
-    static final String[] FIELDS = {"title","notes","category","priority","recurrence","start_date","time","reminder","reminder_end_date","event_date","escalation_days","repeat_until"};
+    static final String[] FIELDS = {"title","notes","category","priority","recurrence","start_date","time","reminder","reminder_end_date","event_date","escalation_days","repeat_until","checkins_enabled"};
     static final String[] SNAPSHOT = {"title","notes","category","priority","time","reminder"};
     private Model() {}
     static int hourInterval(String recurrence) {
@@ -111,6 +111,7 @@ public final class Model {
     /** Воспроизведение очереди не меняет исходный снимок и не теряет новые правки. */
     public static JSONObject view(JSONObject data, String day) throws Exception {
         LinkedHashMap<String,JSONObject> tasks=map(data.getJSONArray("tasks"),false);
+        for(JSONObject task:tasks.values()) if(!task.has("checkins_enabled")) task.put("checkins_enabled",false);
         LinkedHashMap<String,JSONObject> rows=map(data.getJSONArray("occurrences"),true);
         JSONArray pending=data.getJSONArray("pending");
         String today=LocalDate.now().toString();
@@ -173,7 +174,7 @@ public final class Model {
         JSONObject task=new JSONObject().put("title","").put("notes","").put("category","Личное")
             .put("priority","normal").put("recurrence","once").put("start_date",LocalDate.now().toString())
             .put("time",JSONObject.NULL).put("reminder",false);
-        task.put("reminder_end_date",JSONObject.NULL).put("event_date",JSONObject.NULL).put("escalation_days",3).put("repeat_until",JSONObject.NULL);
+        task.put("reminder_end_date",JSONObject.NULL).put("event_date",JSONObject.NULL).put("escalation_days",3).put("repeat_until",JSONObject.NULL).put("checkins_enabled",false);
         for(String field:FIELDS) if(source.has(field)) task.put(field,source.get(field));
         for(String field:new String[]{"title","notes"}) {
             if(!(task.get(field) instanceof String)) throw new IllegalArgumentException("Название и заметка должны быть текстом.");
@@ -205,7 +206,9 @@ public final class Model {
         }
         if(task.optString("time").isEmpty()) task.put("time",JSONObject.NULL);
         if(!task.isNull("time") && !task.getString("time").matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]")) throw new IllegalArgumentException("Время: ЧЧ:ММ.");
-        if(hourInterval(task.getString("recurrence"))>0) {
+        if(!(task.get("checkins_enabled") instanceof Boolean)) throw new IllegalArgumentException("Некорректный переключатель подходов.");
+        if(hourInterval(task.getString("recurrence"))==0) task.put("checkins_enabled",false);
+        if(task.getBoolean("checkins_enabled")) {
             String timeStart=task.optString("time","09:00"),end=task.isNull("repeat_until")?(timeStart.compareTo("21:00")>0?timeStart:"21:00"):task.getString("repeat_until");
             if(!end.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]") || end.compareTo(timeStart)<0) throw new IllegalArgumentException("Конец подходов должен быть не раньше начала.");
             task.put("repeat_until",end);
@@ -220,7 +223,7 @@ public final class Model {
         throw new IllegalArgumentException("Задача не найдена.");
     }
     static JSONObject fields(JSONObject task) throws Exception {
-        JSONObject result=new JSONObject(); for(String key:FIELDS) result.put(key,key.equals("escalation_days")?task.optInt(key,3):nullable(task,key)); return result;
+        JSONObject result=new JSONObject(); for(String key:FIELDS) result.put(key,key.equals("checkins_enabled")?task.optBoolean(key,false):key.equals("escalation_days")?task.optInt(key,3):nullable(task,key)); return result;
     }
     /** Добавить команду, сохраняя значения, на основе которых пользователь правил задачу. */
     public static void mutate(JSONObject data, JSONObject command) throws Exception {

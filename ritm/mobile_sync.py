@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .store import ValidationError, clean_task, parse_day, scheduled, as_bool
 
 FIELDS = ("title", "notes", "category", "priority", "recurrence",
-          "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until")
+          "start_date", "time", "reminder", "reminder_end_date", "event_date", "escalation_days", "repeat_until", "checkins_enabled")
 SNAPSHOT = ("title", "notes", "category", "priority", "time", "reminder")
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ def normalized(row):
     result = dict(row)
     if "reminder" in result:
         result["reminder"] = bool(result["reminder"])
+    if "checkins_enabled" in result:
+        result["checkins_enabled"] = bool(result["checkins_enabled"])
     return result
 
 
@@ -90,7 +92,7 @@ class SyncEngine:
             tasks = [normalized(row) for row in db.execute("SELECT * FROM tasks")]
             occurrences = [normalized(row) for row in db.execute(
                 "SELECT task_id,date,title,notes,category,priority,time,reminder,"
-                "status,completed_at,dismissed_at,slots,checks FROM occurrences WHERE status!='cancelled' OR (checks IS NOT NULL AND checks!='{}')")]
+                "status,completed_at,dismissed_at,slots,checks FROM occurrences WHERE status!='cancelled' OR dismissed_at IS NOT NULL OR (checks IS NOT NULL AND checks!='{}')")]
             for row in occurrences:
                 row["slots"] = json.loads(row["slots"]) if row["slots"] else None
                 row["checks"] = json.loads(row["checks"]) if row["checks"] else {}
@@ -224,8 +226,8 @@ class SyncEngine:
             raise ValidationError("Неизвестные поля изменения.")
         compared = values if kind == "edit" else FIELDS
         for key in compared:
-            if kind == "archive" and key not in before and key in ("reminder_end_date", "event_date", "escalation_days", "repeat_until"):
-                if current[key] == (3 if key == "escalation_days" else None):
+            if kind == "archive" and key not in before and key in ("reminder_end_date", "event_date", "escalation_days", "repeat_until", "checkins_enabled"):
+                if current[key] == (3 if key == "escalation_days" else False if key == "checkins_enabled" else None):
                     continue
             if key not in before or (current[key] != before[key] and current[key] != values.get(key)):
                 raise ValidationError("На двух устройствах изменено одно поле: " + key + ".", 409)
@@ -258,7 +260,9 @@ class SyncEngine:
                        or task["recurrence"] != current["recurrence"]
                        or task["start_date"] != current["start_date"]
                        or task["event_date"] != current["event_date"]
-                       or task["escalation_days"] != current["escalation_days"])
+                       or task["escalation_days"] != current["escalation_days"]
+                       or task["repeat_until"] != current["repeat_until"]
+                       or task["checkins_enabled"] != current["checkins_enabled"])
             db.execute("UPDATE occurrences SET title=?,notes=?,category=?,priority=?,time=?,reminder=?,"
                        "status=?,notified_at=?,snooze_until=? WHERE id=?",
                        tuple(task[key] for key in SNAPSHOT) + (status,

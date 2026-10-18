@@ -16,4 +16,9 @@ const cancelled={...row,status:'cancelled'};assert.equal(engine.events([cancelle
 const corrected={...row,status:'pending',checks:{'09:00':'2026-10-18T12:10:00+03:00'}};
 assert.equal(engine.awards(engine.events([corrected]),[corrected],'2026-10-18').metrics.total,1);
 assert.equal(engine.awards([],[],'2026-10-18').earned,0);
+const dismissed={task_id:'laundry',date:'2026-10-17',title:'Стирка',status:'pending',dismissed_at:'2026-10-18T03:00:00+03:00'};
+assert.equal(engine.xp([dismissed]),-5);
+assert.equal(engine.xp([corrected,dismissed]),5);
+assert.equal(engine.xp([corrected,{...dismissed,status:'cancelled'}]),5);
+assert.equal(engine.xp([corrected,{...dismissed,dismissed_at:null}]),10);
 console.log('100 unique awards, personal action milestones, slot events, reversal, archive and escaping OK.');
