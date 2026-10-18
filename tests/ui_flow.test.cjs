@@ -24,6 +24,7 @@ class Element {
   }
   addEventListener(type, fn) { const list = this.listeners.get(type) || []; list.push(fn); this.listeners.set(type, list); }
   async fire(type, target = this) { for (const fn of this.listeners.get(type) || []) await fn({target, preventDefault() {}}); }
+  contains(target) { return !!target && (target === this || target.parentElement === this); }
   setAttribute(key, value) { this.attrs[key] = value; }
   removeAttribute(key) { delete this.attrs[key]; }
   hasAttribute(key) { return Object.hasOwn(this.attrs, key); }
@@ -77,6 +78,11 @@ for (const e of elements) {
 }
 const storage = new Map();
 const timers = [];
+const timeouts = new Map(), windowEvents = new Map();let nextTimeout=0;
+async function advanceTimeouts(delay) {
+  for(const [id,item] of [...timeouts]) if(item.delay===delay && timeouts.delete(id)) {await item.fn();await tick();}
+}
+async function fireWindow(type,target) { for(const fn of windowEvents.get(type)||[]) await fn({target}); }
 const task_id = '11111111-1111-4111-8111-111111111111';
 let templates = [{id:task_id, title:'План', notes:'', category:'Личное', priority:'normal',
   start_date:'2026-10-20', recurrence:'once', time:null, reminder:false}];
@@ -88,12 +94,13 @@ const current = {
   summary:{done:0, xp:0, level:1, streak:0, longest_streak:0},
 };
 let patch_gate = null;
+let dayReviewGate = null;
 let notification_delivery = {accepted:true,message:'Windows приняла уведомление'};
 const day_review = {date:'2026-10-14',is_past:true,done:[{title:'Сделано <script>',completed_at:'2026-10-14T21:00:00+03:00'}],unfinished:[{title:'Лекция & физика',completed_at:null}]};
 const requests = [];
 const context = {document, localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},
-  window:{scrollTo(){},innerWidth:1200,innerHeight:800}, navigator:{}, console,
-  setTimeout:()=>1, clearTimeout(){}, setInterval:fn=>{timers.push(fn);return 1;}, clearInterval(){},
+  window:{scrollTo(){},innerWidth:1200,innerHeight:800,addEventListener(type,fn){const list=windowEvents.get(type)||[];list.push(fn);windowEvents.set(type,list);}}, navigator:{}, console,
+  setTimeout:(fn,delay)=>{const id=++nextTimeout;timeouts.set(id,{fn,delay});return id;}, clearTimeout:id=>timeouts.delete(id), setInterval:fn=>{timers.push(fn);return 1;}, clearInterval(){},
   fetch: async (url, options={}) => {
     const endpoint = url.split('?')[0].replace('/api/v1','');
     const body = options.body ? JSON.parse(options.body) : null;
@@ -103,7 +110,7 @@ const context = {document, localStorage:{getItem:k=>storage.get(k),setItem:(k,v)
     else if (endpoint === '/tasks') result = {tasks:templates};
     else if (endpoint === '/app/exit-fullscreen') result = {exited:true};
     else if (endpoint === '/notification-test') result = {delivery:notification_delivery};
-    else if (endpoint === '/progress/day') result = day_review;
+    else if (endpoint === '/progress/day') { if(dayReviewGate) await dayReviewGate;result = day_review; }
     else if (endpoint === '/occurrences/77/dismiss') {
       const row=[...current.tasks,...current.unfinished].find(row=>row.id===77);
       row.dismissed_at=body.dismissed?'2026-10-15T03:00:00+03:00':null;
@@ -278,9 +285,59 @@ async function tick() { await Promise.resolve(); await Promise.resolve(); await 
   assert.match(get('dayReview').innerHTML,/Не выполнено к концу дня/);
   const cell=new Element('button',{'data-activity-day':'2026-10-14'});cell.isConnected=true;
   get('activityTooltip').offsetWidth=330;get('activityTooltip').offsetHeight=200;
-  await get('heatmap').fire('mouseover',cell);await tick();
+  await get('heatmap').fire('mouseover',cell);await advanceTimeouts(150);await tick();
   assert.equal(get('activityTooltip').hidden,false);
   assert.match(get('activityTooltip').innerHTML,/Лекция &amp; физика/);
+  const popup=get('activityTooltip'),nextCell=new Element('button',{'data-activity-day':'2026-10-13'});nextCell.isConnected=true;
+  const originalContent=popup.innerHTML;
+  await get('heatmap').fire('mouseout',cell);
+  await get('heatmap').fire('mouseover',nextCell);
+  await popup.fire('mouseenter');
+  await advanceTimeouts(150);await advanceTimeouts(350);
+  assert.equal(popup.hidden,false,'crossing nearby cells into the popup must keep it open');
+  assert.equal(run('tooltip_day'),'2026-10-14');
+  popup.scrollTop=320;
+  await fireWindow('scroll',popup);
+  assert.equal(popup.hidden,false,'captured scroll from the list must not close it');
+  const popupChild=new Element('section');popupChild.parentElement=popup;
+  await fireWindow('scroll',popupChild);
+  assert.equal(popup.hidden,false,'scroll inside a nested list section must remain open');
+  assert.equal(popup.scrollTop,320);
+  await run('load_state()');
+  assert.equal(popup.scrollTop,320,'polling must preserve reading position');
+  assert.equal(popup.innerHTML,originalContent);
+  await popup.fire('mouseleave');
+  await advanceTimeouts(350);
+  assert.equal(popup.hidden,true,'leaving both the cell and popup closes after a grace period');
+
+  await get('heatmap').fire('focusin',cell);await tick();
+  document.activeElement=popup;
+  await popup.fire('focusin');await get('heatmap').fire('focusout',cell);await advanceTimeouts(350);
+  assert.equal(popup.hidden,false,'keyboard focus within the popup must keep it open');
+  document.activeElement=null;await popup.fire('focusout');await advanceTimeouts(350);
+  assert.equal(popup.hidden,true);
+
+  await get('heatmap').fire('focusin',cell);await tick();
+  let finishDayReview;
+  dayReviewGate=new Promise(resolve=>{finishDayReview=resolve;});
+  context.nextTooltipCell=nextCell;
+  const pendingDay=run('show_activity_tooltip(nextTooltipCell)');await tick();
+  await popup.fire('mouseenter');
+  finishDayReview();await pendingDay;dayReviewGate=null;
+  assert.equal(run('tooltip_day'),'2026-10-14','late responses for adjacent days must not replace the list being read');
+  assert.equal(popup.innerHTML,originalContent);
+  await fireWindow('scroll',document);
+  assert.equal(popup.hidden,true,'scrolling the page still dismisses the anchored popup');
+
+  const savedDone=day_review.done;
+  day_review.done=Array.from({length:40},(_,i)=>({title:'Дело '+i,completed_at:'2026-10-14T21:00:00+03:00'}));
+  await get('heatmap').fire('focusin',cell);await tick();
+  assert.match(popup.innerHTML,/Дело 39/,'all tasks must remain in the scrollable popup');
+  popup.scrollTop=500;await fireWindow('scroll',popup);assert.equal(popup.hidden,false);
+  assert.match(fs.readFileSync(path.join(root,'styles.css'),'utf8'),/\.activity-tooltip\{[^}]*overscroll-behavior:contain/);
+  day_review.done=savedDone;
+  run('hide_activity_tooltip()');
+
   const overdue={id:77,task_id,date:'2026-10-13',title:'Лекция <script>',category:'Учёба',status:'pending',can_dismiss:true,dismissed_at:null};
   assert.match(run('render_task('+JSON.stringify(overdue)+',false)'),/data-dismiss="77"/);
   assert.doesNotMatch(run('render_task('+JSON.stringify({...overdue,can_dismiss:false})+',false)'),/data-dismiss=/);

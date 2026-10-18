@@ -26,6 +26,9 @@ let review_date = null;
 let review_generation = 0;
 let tooltip_generation = 0;
 let tooltip_timer = null;
+let tooltip_open_timer = null;
+let tooltip_day = null;
+let tooltip_interacting = false;
 let activity_signature = null;
 let calendar_month = null;
 let generation = 0;
@@ -126,7 +129,7 @@ async function load_state() {
     state = result;
     selected_date = state.selected_date;
     calendar_month ??= state.today.slice(0, 7);
-    const older_backend = state.version !== "0.4.2";
+    const older_backend = state.version !== "0.4.3";
     $("#connectionError").hidden = !older_backend;
     if (older_backend) $("#connectionError").textContent = "Работает другая версия Ритма. Заверши приложение через настройки или трей и запусти обновлённый Ritm.exe.";
     render();
@@ -171,18 +174,27 @@ async function show_day_review(day, focus = false) {
 }
 
 function hide_activity_tooltip() {
+  clearTimeout(tooltip_timer);
+  clearTimeout(tooltip_open_timer);
   ++tooltip_generation;
+  tooltip_day = null;
+  tooltip_interacting = false;
   $("#activityTooltip").hidden = true;
 }
 
 async function show_activity_tooltip(cell) {
   clearTimeout(tooltip_timer);
-  const request = ++tooltip_generation;
+  clearTimeout(tooltip_open_timer);
   const tooltip = $("#activityTooltip");
+  if (tooltip_interacting) return;
+  const request = ++tooltip_generation;
+  if (tooltip_day === cell.dataset.activityDay && !tooltip.hidden) return;
   try {
     const value = await api("/progress/day?date=" + encodeURIComponent(cell.dataset.activityDay));
-    if (request !== tooltip_generation || !cell.isConnected) return;
+    if (request !== tooltip_generation || !cell.isConnected || tooltip_interacting) return;
     tooltip.innerHTML = day_details_html(value, true);
+    tooltip.scrollTop = 0;
+    tooltip_day = cell.dataset.activityDay;
     tooltip.hidden = false;
     const rect = cell.getBoundingClientRect();
     const left = Math.max(12, Math.min(rect.left - 140, window.innerWidth - tooltip.offsetWidth - 12));
@@ -193,14 +205,45 @@ async function show_activity_tooltip(cell) {
 }
 
 $("#reviewDate").addEventListener("change", () => { if ($("#reviewDate").value) show_day_review($("#reviewDate").value); });
+function schedule_activity_tooltip_close() {
+  clearTimeout(tooltip_timer);
+  tooltip_timer = setTimeout(() => {
+    if (!tooltip_interacting && !$("#activityTooltip").contains(document.activeElement)) hide_activity_tooltip();
+  }, 350);
+}
 for (const event of ["mouseover", "focusin"]) $("#heatmap").addEventListener(event, value => {
   const cell = value.target.closest("[data-activity-day]");
-  if (cell) return show_activity_tooltip(cell);
+  if (!cell || tooltip_interacting) return;
+  clearTimeout(tooltip_timer);
+  clearTimeout(tooltip_open_timer);
+  if (event === "focusin") return show_activity_tooltip(cell);
+  // Курсор может пересечь соседние клетки по пути к открытому списку.
+  tooltip_open_timer = setTimeout(() => show_activity_tooltip(cell), 150);
 });
-for (const event of ["mouseout", "focusout"]) $("#heatmap").addEventListener(event, () => { tooltip_timer = setTimeout(hide_activity_tooltip, 180); });
-$("#activityTooltip").addEventListener("mouseenter", () => clearTimeout(tooltip_timer));
-$("#activityTooltip").addEventListener("mouseleave", hide_activity_tooltip);
-window.addEventListener?.("scroll", () => { if (!$("#activityTooltip").hidden) hide_activity_tooltip(); }, true);
+for (const event of ["mouseout", "focusout"]) $("#heatmap").addEventListener(event, () => {
+  clearTimeout(tooltip_open_timer);
+  schedule_activity_tooltip_close();
+});
+$("#activityTooltip").addEventListener("mouseenter", () => {
+  tooltip_interacting = true;
+  clearTimeout(tooltip_timer);
+  clearTimeout(tooltip_open_timer);
+  ++tooltip_generation;
+});
+$("#activityTooltip").addEventListener("mouseleave", () => {
+  tooltip_interacting = false;
+  schedule_activity_tooltip_close();
+});
+$("#activityTooltip").addEventListener("focusin", () => {
+  clearTimeout(tooltip_timer);
+  clearTimeout(tooltip_open_timer);
+  ++tooltip_generation;
+});
+$("#activityTooltip").addEventListener("focusout", schedule_activity_tooltip_close);
+window.addEventListener?.("scroll", event => {
+  const tooltip = $("#activityTooltip");
+  if (!tooltip.hidden && !tooltip.contains(event.target)) hide_activity_tooltip();
+}, true);
 
 /** Отрисовать календарную ленту и фактический прогресс выбранного дня. */
 function render_today() {
@@ -402,6 +445,7 @@ async function render_calendar() {
 
 /** Переключить страницу, сохраняя выбранную дату при переходе из календаря. */
 function change_view(view, keep_date = false) {
+  if (view !== "progress") hide_activity_tooltip();
   if (!(view in view_names)) return;
   current_view = view;
   $$(".view").forEach(section => { section.hidden = section.id !== view + "View"; });
