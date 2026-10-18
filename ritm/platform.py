@@ -96,7 +96,7 @@ def open_window(url, directory):
         subprocess.Popen([
             executable, "--app=" + url,
             "--user-data-dir=" + str(directory / "browser-profile"),
-            "--no-first-run", "--start-maximized", "--start-fullscreen",
+            "--no-first-run", "--start-maximized",
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         webbrowser.open(url, new=1)

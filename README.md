@@ -1,12 +1,15 @@
-# Ритм 0.4.3
+# Ритм 0.4.4
 
 ## Скачать Ритм
 
-- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.3/Ritm.exe)
+- [Ритм для Windows — Ritm.exe](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.4/Ritm.exe)
 - [Ритм для Android — APK](https://github.com/Klio-de-Janeiro/ritm/releases/download/v0.4.2/Ritm-Android.apk)
 - [Автоматическое переподключение телефона к ноутбуку](UPDATE_0.3.5_RU.md)
 
 На Android устанавливай APK поверх предыдущей версии, без удаления приложения, чтобы сохранить данные и подключение.
+
+Обновление Windows 0.4.4: приложение открывается в развёрнутом окне
+с кнопками свернуть, развернуть и закрыть. [Описание](UPDATE_0.4.4_RU.md).
 
 Обновление Windows 0.4.3: окно дня при наведении на клетку активности
 остаётся открытым при прокрутке списка. Переход от клетки к списку
@@ -36,7 +39,7 @@ Esc и локальные инструменты ChatGPT Desktop. Начни с
 **[UPDATE_0.3.1_RU.md](UPDATE_0.3.1_RU.md)**.
 Для прямого голосового добавления задач: **[GPT_SETUP_RU.md](GPT_SETUP_RU.md)**.
 
-Новое: запуск Windows на весь экран, Android-приложение с офлайн-очередью,
+Новое: запуск Windows в развёрнутом окне, Android-приложение с офлайн-очередью,
 синхронизация в домашней сети и проверяемый импорт планов из ChatGPT.
 Инструкция сборки APK: **[ANDROID_GPT_RU.md](ANDROID_GPT_RU.md)**.
 После установки Android Studio и SDK запусти `.\BUILD_ANDROID`.

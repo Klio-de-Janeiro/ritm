@@ -171,9 +171,10 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(ValidationError): import_plan(self.store, bad)
         self.assertEqual(len(self.store.list_tasks()), 2)
 
-    def test_chromium_launch_requests_fullscreen_with_private_profile(self):
+    def test_chromium_launch_requests_maximized_window_with_private_profile(self):
         with patch("ritm.platform.browser_executable", return_value="msedge.exe"), patch("ritm.platform.subprocess.Popen") as process:
             open_window("http://127.0.0.1:8768", self.directory)
             args = process.call_args.args[0]
-            self.assertIn("--start-fullscreen", args)
+            self.assertIn("--start-maximized", args)
+            self.assertNotIn("--start-fullscreen", args)
             self.assertIn("--user-data-dir=" + str(self.directory / "browser-profile"), args)

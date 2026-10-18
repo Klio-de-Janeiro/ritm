@@ -129,7 +129,7 @@ async function load_state() {
     state = result;
     selected_date = state.selected_date;
     calendar_month ??= state.today.slice(0, 7);
-    const older_backend = state.version !== "0.4.3";
+    const older_backend = state.version !== "0.4.4";
     $("#connectionError").hidden = !older_backend;
     if (older_backend) $("#connectionError").textContent = "Работает другая версия Ритма. Заверши приложение через настройки или трей и запусти обновлённый Ritm.exe.";
     render();
