@@ -23,6 +23,7 @@ final class Deadline {
         row.put("deadline_at",deadline.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString())
             .put("grace_until",until.atZone(ZoneId.systemDefault()).toOffsetDateTime().toString())
             .put("in_grace",pending && !now.isBefore(deadline) && now.isBefore(until))
-            .put("can_dismiss",pending && !now.isBefore(until));
+            .put("can_dismiss",pending && !LocalDate.parse(row.getString("date")).isAfter(now.toLocalDate()))
+            .put("in_unfinished",row.getString("status").equals("pending") && (!row.isNull("dismissed_at") || !now.isBefore(until)));
     }
 }

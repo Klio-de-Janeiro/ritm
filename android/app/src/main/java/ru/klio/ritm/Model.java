@@ -262,7 +262,7 @@ public final class Model {
                 if(row==null || !row.getString("status").equals("pending")) throw new IllegalArgumentException("Дело уже выполнено или отменено.");
                 boolean dismissed=command.getBoolean("dismissed");
                 if(dismissed==!row.isNull("dismissed_at")) return;
-                if(dismissed && !row.optBoolean("can_dismiss")) throw new IllegalArgumentException("Зачеркнуть можно после двух дополнительных часов.");
+                if(dismissed && !row.optBoolean("can_dismiss")) throw new IllegalArgumentException("Будущее дело пока нельзя зачеркнуть.");
                 op.put("date",day).put("dismissed",dismissed)
                     .put("dismissed_at",dismissed?OffsetDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
                         .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx")):JSONObject.NULL)

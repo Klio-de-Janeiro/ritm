@@ -61,7 +61,7 @@ function render() {
   $("#syncBadge").textContent=state.pending_count?`В очереди: ${state.pending_count}`:state.connected?"Синхронизация":"Офлайн";
   const date=new Date(day+"T12:00:00"),label=date.toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"});
   $("#dayLabel").textContent=label[0].toUpperCase()+label.slice(1);$("#selectedDay").value=day;
-  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&(row.date===day||(day===today()&&(row.in_grace||row.dismissed_at&&row.date<today()))));
+  const rows=state.occurrences.filter(row=>row.status!=="cancelled"&&!row.dismissed_at&&(row.date===day||(day===today()&&row.date<today()&&row.status==="pending"&&!row.in_unfinished)));
   const done=rows.filter(row=>row.status==="done").length;
   $("#dailyCount").textContent=`${done} / ${rows.length}`;$("#dailyProgress").max=Math.max(1,rows.length);$("#dailyProgress").value=done;
   const visible=rows.filter(row=>filter==="all"||row.status===filter).sort((a,b)=>(a.time||"99:99").localeCompare(b.time||"99:99"));
@@ -70,7 +70,7 @@ function render() {
   $("#awardsMobile").innerHTML=RitmProgress.html(RitmProgress.awards(history,state.occurrences,today()),awardFilter,awardExpanded);
   const days=new Set(history.map(row=>(row.completed_at||row.date).slice(0,10)));
   $("#progressStats").innerHTML=`<div class="stat"><strong>${RitmProgress.xp(state.occurrences)}</strong><span>XP · +10 выполнено / −5 зачёркнуто</span></div><div class="stat"><strong>${days.size}</strong><span>Дней с победами</span></div>`;
-  const missed=state.occurrences.filter(row=>row.status==="pending"&&!row.dismissed_at&&row.date<today()).sort((a,b)=>b.date.localeCompare(a.date));
+  const missed=state.occurrences.filter(row=>row.status==="pending"&&row.in_unfinished).sort((a,b)=>b.date.localeCompare(a.date));
   $("#unfinishedList").innerHTML=missed.length?missed.map(rowHtml).join(""):'<p class="muted">Пропущенных дел пока нет.</p>';
   $("#reviewDate").max=today();$("#reviewDate").value=reviewDay;
   renderActivity(history);renderDayReview();

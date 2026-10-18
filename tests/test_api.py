@@ -80,15 +80,13 @@ class ApiTests(unittest.TestCase):
             "Origin": "https://other.invalid"})["status"], 403)
         self.assertEqual(self.request("POST", path, {})["body"], {"exited": True})
 
-    def test_dismiss_endpoint_checks_authentication_deadline_and_undo(self):
+    def test_dismiss_endpoint_checks_authentication_early_dismissal_and_undo(self):
         now = datetime.now().astimezone().replace(hour=21,minute=0,second=0,microsecond=0)
         self.store.clock = lambda: now
         self.store.create_task({"title":"Лекция"})
         row = self.store.state(now.date().isoformat())["tasks"][0]
         path = f"/api/v1/occurrences/{row['id']}/dismiss"
         self.assertEqual(self.request("POST", path, {}, auth=False)["status"],401)
-        self.assertEqual(self.request("POST", path, {})["status"],409)
-        now += timedelta(hours=5)
         self.assertIsNotNone(self.request("POST", path, {})["body"]["dismissed_at"])
         self.assertEqual(self.store.state(now.date().isoformat())["summary"]["xp"],-5)
         self.assertIsNone(self.request("POST", path, {"dismissed":False})["body"]["dismissed_at"])

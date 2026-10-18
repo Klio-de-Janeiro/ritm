@@ -44,7 +44,8 @@ def occurrence_state(row, now):
     result.update(deadline_at=end.replace(tzinfo=now.tzinfo).isoformat(),
                   grace_until=until.replace(tzinfo=now.tzinfo).isoformat(),
                   in_grace=row["status"] == "pending" and not row["dismissed_at"] and end <= local < until,
-                  can_dismiss=row["status"] == "pending" and not row["dismissed_at"] and local >= until)
+                  can_dismiss=row["status"] == "pending" and not row["dismissed_at"] and row["date"] <= now.date().isoformat(),
+                  in_unfinished=row["status"] == "pending" and (bool(row["dismissed_at"]) or local >= until))
     return result
 
 

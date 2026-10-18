@@ -44,14 +44,56 @@ class GraceTests(unittest.TestCase):
         self.assertEqual(self.store.state('2026-10-17')['summary']['xp'],10)
         self.assertEqual(self.store.day_details('2026-10-16')['unfinished'],[])
 
-    def test_dismissal_is_eligible_only_after_grace_and_can_be_undone(self):
-        self.at(1,59)
-        with self.assertRaises(ValidationError): self.store.dismiss(self.row['id'])
-        self.at(2,1)
+    def test_at_two_am_unfinished_task_leaves_today_without_automatic_penalty(self):
+        self.at(1,59,59)
+        state=self.store.state('2026-10-17')
+        self.assertEqual([row['id'] for row in state['tasks']],[self.row['id']])
+        self.assertEqual(state['unfinished'],[])
+        self.at(2)
+        state=Store(self.path,clock=lambda:self.now).state('2026-10-17')
+        self.assertEqual(state['tasks'],[])
+        self.assertEqual([row['id'] for row in state['unfinished']],[self.row['id']])
+        self.assertIsNone(state['unfinished'][0]['dismissed_at'])
+        self.assertEqual(state['summary']['xp'],0)
+
+    def test_early_dismissal_moves_to_unfinished_immediately_and_stops_reminders(self):
+        self.assertTrue(self.row['can_dismiss'])
+        self.store.dismiss(self.row['id'])
+        state=self.store.state('2026-10-16')
+        self.assertEqual(state['tasks'],[])
+        self.assertEqual(len(state['unfinished']),1)
+        self.assertEqual(state['unfinished'][0]['date'],'2026-10-16')
+        self.assertEqual(state['summary']['xp'],-5)
+        self.assertEqual(self.store.due_notifications(),[])
+        self.assertEqual(self.at(1),[])
+        self.assertEqual(self.at(2),[])
+        self.assertEqual(self.store.state('2026-10-17')['tasks'],[])
+        self.store.dismiss(self.row['id'],False)
+        self.assertEqual(self.store.state('2026-10-17')['tasks'],[])
+        self.assertEqual(self.store.state('2026-10-17')['summary']['xp'],0)
+
+    def test_undo_today_returns_task_and_future_task_cannot_be_dismissed(self):
+        self.store.dismiss(self.row['id'])
+        self.store.dismiss(self.row['id'],False)
+        self.assertEqual(len(self.store.state('2026-10-16')['tasks']),1)
+        task=self.store.create_task(dict(title='Завтра',start_date='2026-10-17'))
+        future=next(row for row in self.store.state('2026-10-17')['tasks'] if row['task_id']==task['id'])
+        self.assertFalse(future['can_dismiss'])
+        with self.assertRaises(ValidationError):self.store.dismiss(future['id'])
+
+    def test_early_dismissal_from_phone_syncs_without_deadline_wait(self):
+        engine=SyncEngine(self.store,'laptop')
+        op=dict(id=str(uuid.uuid4()),kind='dismiss',task_id=self.task['id'],date=self.row['date'],dismissed=True,
+                dismissed_at=self.now.isoformat(),before=dict(status='pending',dismissed_at=None))
+        self.assertEqual(engine.exchange(dict(protocol=2,operations=[op]))['accepted'],[op['id']])
+        self.assertEqual(self.store.state('2026-10-16')['tasks'],[])
+        self.assertEqual(self.store.state('2026-10-16')['summary']['xp'],-5)
+
+    def test_dismissal_is_available_before_deadline_and_can_be_undone(self):
         self.store.dismiss(self.row['id'])
         state = self.store.state('2026-10-17')
-        self.assertIsNotNone(state['tasks'][0]['dismissed_at'])
-        self.assertEqual(state['unfinished'],[])
+        self.assertIsNotNone(state['unfinished'][0]['dismissed_at'])
+        self.assertEqual(state['tasks'],[])
         self.assertEqual(state['summary']['xp'],-5)
         self.assertEqual(self.at(2,2), [])
         with self.assertRaises(ValidationError): self.store.complete(self.row['id'])
@@ -103,8 +145,8 @@ class GraceTests(unittest.TestCase):
         self.assertEqual(state['summary']['xp'],-5)
         self.assertEqual(state['summary']['level'],1)
         self.assertEqual(state['summary']['dismissed'],1)
-        self.assertEqual(len(state['tasks']),1)
-        self.assertEqual(state['unfinished'],[])
+        self.assertEqual(state['tasks'],[])
+        self.assertEqual(len(state['unfinished']),1)
         self.store.dismiss(self.row['id'],False)
         self.assertEqual(self.store.state('2026-10-17')['summary']['xp'],0)
         self.store.dismiss(self.row['id'])

@@ -31,7 +31,7 @@ class DayHistoryTests(unittest.TestCase):
         state = self.store.state("2026-10-17")
         self.assertTrue(state["tasks"][0]["in_grace"])
         self.assertEqual(state["tasks"][0]["grace_until"], "2026-10-17T02:00:00+03:00")
-        self.assertEqual([row["title"] for row in state["unfinished"]], ["Лекция по физике"])
+        self.assertEqual(state["unfinished"], [])
         self.assertEqual(self.store.day_details("2026-10-16")["unfinished"][0]["title"], "Лекция по физике")
 
     def test_restart_after_missed_day_does_not_deliver_old_reminder(self):

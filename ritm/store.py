@@ -540,11 +540,10 @@ class Store:
         if bool(row["dismissed_at"]) == dismissed:
             return {"id": occurrence_id, "dismissed_at": row["dismissed_at"]}
         now = self.clock()
-        until = deadline(row) + timedelta(hours=2)
-        if dismissed and now.replace(tzinfo=None) < until:
-            raise ValidationError("Зачеркнуть дело можно после двух дополнительных часов.", 409)
+        if dismissed and row["date"] > now.date().isoformat():
+            raise ValidationError("Будущее дело пока нельзя зачеркнуть.", 409)
         moment = when or now
-        if dismissed and (moment.tzinfo is None or moment.replace(tzinfo=None) < until or moment > now + timedelta(days=1)):
+        if dismissed and (moment.tzinfo is None or moment.astimezone(now.tzinfo).date().isoformat() < row["date"] or moment > now + timedelta(minutes=5)):
             raise ValidationError("Некорректное время зачёркивания.")
         value = moment.isoformat() if dismissed else None
         connection.execute("UPDATE occurrences SET dismissed_at=?,snooze_until=NULL WHERE id=?", (value, occurrence_id))
@@ -721,7 +720,7 @@ class Store:
             ).fetchall()
             unfinished = connection.execute(
                 "SELECT o.*, t.recurrence, t.archived_date, t.start_date, t.reminder_end_date FROM occurrences o "
-                "JOIN tasks t ON t.id=o.task_id WHERE o.status='pending' AND o.date<? "
+                "JOIN tasks t ON t.id=o.task_id WHERE o.status='pending' AND o.date<=? "
                 "ORDER BY o.date DESC, o.time IS NULL, o.time, o.id",
                 (today.isoformat(),),
             ).fetchall()
@@ -783,10 +782,10 @@ class Store:
         return {
             "today": today.isoformat(), "selected_date": selected,
             "server_time": self.clock().isoformat(),
-            "tasks": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in rows] + (
+            "tasks": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in rows if not row["dismissed_at"]] + (
                 [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished
-                 if occurrence_state(row, self.clock())["in_grace"] or row["dismissed_at"]] if day == today else []),
-            "unfinished": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished if not row["dismissed_at"]],
+                 if row["date"] < selected and not row["dismissed_at"] and not occurrence_state(row, self.clock())["in_unfinished"]] if day == today else []),
+            "unfinished": [dict(occurrence_state(row, self.clock()), reminder=bool(row["reminder"])) for row in unfinished if occurrence_state(row, self.clock())["in_unfinished"]],
             "week": week, "activity": activity,
             "summary": {"done": total_done, "xp": xp, "dismissed": dismissed_count,
                         "level": max(1, xp // 100 + 1),
