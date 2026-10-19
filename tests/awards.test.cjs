@@ -22,3 +22,9 @@ assert.equal(engine.xp([corrected,dismissed]),5);
 assert.equal(engine.xp([corrected,{...dismissed,status:'cancelled'}]),5);
 assert.equal(engine.xp([corrected,{...dismissed,dismissed_at:null}]),10);
 console.log('100 unique awards, personal action milestones, slot events, reversal, archive and escaping OK.');
+
+assert.equal(engine.timeLabel({time:'09:00',recurrence:'every_3_hours',repeat_until:'23:00'}),'09:00–23:00');
+assert.equal(engine.timeLabel({time:'09:00'}, {recurrence:'every_3_hours',repeat_until:'23:00'}),'09:00–23:00');
+assert.equal(engine.timeLabel({time:'09:00',recurrence:'daily',repeat_until:'23:00'}),'09:00');
+assert.equal(engine.timeLabel({time:'09:00',recurrence:'every_3_hours'}),'С 09:00');
+assert.equal(engine.timeLabel({time:null}),'Без времени');

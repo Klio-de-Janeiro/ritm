@@ -16,6 +16,19 @@ class CheckinTests(unittest.TestCase):
         self.task=self.store.create_task(dict(title='спорт',time='09:00',reminder=True,recurrence='every_3_hours',checkins_enabled=True))
         self.row=self.store.state('2026-10-18')['tasks'][0]
 
+    def test_range_end_is_in_state_unfinished_and_calendar_without_extra_slot(self):
+        self.store.update_task(self.task['id'], {'repeat_until':'23:00'})
+        state=self.store.state('2026-10-18')
+        self.assertEqual(state['tasks'][0]['repeat_until'],'23:00')
+        self.assertEqual(state['tasks'][0]['slots'],['09:00','12:00','15:00','18:00','21:00'])
+        calendar=self.store.calendar('2026-10')
+        row=next(row for day in calendar['days'] for row in day['tasks'] if row['date']=='2026-10-18')
+        self.assertEqual(row['repeat_until'],'23:00')
+        self.assertEqual(row['recurrence'],'every_3_hours')
+        self.now+=timedelta(days=1)
+        unfinished=self.store.state('2026-10-19')['unfinished']
+        self.assertEqual(next(row for row in unfinished if row['date']=='2026-10-18')['repeat_until'],'23:00')
+
     def test_missed_check_can_be_corrected_without_duplicating_xp(self):
         self.assertEqual(self.task['title'],'Спорт')
         self.assertEqual(self.row['slots'],['09:00','12:00','15:00','18:00','21:00'])

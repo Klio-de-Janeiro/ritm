@@ -14,6 +14,13 @@
   function xp(rows) {
     return events(rows).length*10-rows.filter(row=>row.dismissed_at).length*5;
   }
+  function timeLabel(row,task=row) {
+    if(!row.time) return 'Без времени';
+    const hourly=/^(hourly|every_\d+_hours)$/.test(task?.recurrence||row.recurrence||'');
+    if(!hourly) return row.time;
+    const end=task?.repeat_until||row.repeat_until;
+    return end?`${row.time}–${end}`:`С ${row.time}`;
+  }
   function awards(completions,rows,today,facts={}) {
     const byDay=new Map(),byAction=new Map(),parts=new Map(),weekdays=new Set();
     let morning=0,evening=0;
@@ -62,5 +69,5 @@
     const done=row.checkins.filter(item=>item.status==='done').length;
     return `<div class="checkin-list" role="group" aria-label="Подходы: ${esc(row.title)}"><p class="checkin-summary">${done} / ${row.checkins.length} подходов · каждый по 10 XP</p><div class="checkin-grid">${row.checkins.map(item=>`<button type="button" class="checkin ${item.status}" data-check-slot="${item.time}" ${phone?`data-slot-task="${esc(row.task_id)}"`:`data-slot-id="${row.id}"`} data-slot-date="${row.date}" data-slot-completed="${item.status!=='done'}" aria-pressed="${item.status==='done'}" aria-label="${item.status==='done'?'Отменить':'Отметить'} подход ${item.time}: ${esc(row.title)}" ${!item.available?'disabled':''}><span>${item.time}</span><strong>${{done:'✓',missed:'—',pending:'+',future:'·'}[item.status]}</strong></button>`).join('')}</div><small>Прочерк — пропуск. Нажми, чтобы заменить его галочкой.</small></div>`;
   }
-  window.RitmProgress=Object.freeze({events,xp,awards,html,checks});
+  window.RitmProgress=Object.freeze({events,xp,timeLabel,awards,html,checks});
 })();

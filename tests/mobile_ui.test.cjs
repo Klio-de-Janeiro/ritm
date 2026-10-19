@@ -171,5 +171,6 @@ run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
   assert.match(get('unfinishedList').innerHTML,/Зачёркнуто сегодня/);
   assert.match(get('dailyCount').textContent,/0 \/ 0/);
 
+  assert.match(run("rowHtml({task_id:'range',title:'Спортик',time:'09:00',date:today(),recurrence:'every_3_hours',repeat_until:'23:00',status:'pending'})"),/09:00–23:00/);
   console.log('Mobile: legacy colors, preview during polling, save/cancel, light theme, calendar alignment, scroll and escaped history OK.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -712,14 +712,14 @@ class Store:
                 if week_day >= today:
                     self._materialize(connection, week_day)
             rows = connection.execute(
-                "SELECT o.*, t.recurrence, t.archived_date, t.start_date, t.reminder_end_date FROM occurrences o "
+                "SELECT o.*, t.recurrence, t.repeat_until, t.archived_date, t.start_date, t.reminder_end_date FROM occurrences o "
                 "JOIN tasks t ON t.id=o.task_id WHERE o.status!='cancelled' "
                 "AND o.date=? "
                 "ORDER BY o.date, o.time IS NULL, o.time, o.id",
                 (selected,),
             ).fetchall()
             unfinished = connection.execute(
-                "SELECT o.*, t.recurrence, t.archived_date, t.start_date, t.reminder_end_date FROM occurrences o "
+                "SELECT o.*, t.recurrence, t.repeat_until, t.archived_date, t.start_date, t.reminder_end_date FROM occurrences o "
                 "JOIN tasks t ON t.id=o.task_id WHERE o.status='pending' AND o.date<=? "
                 "ORDER BY o.date DESC, o.time IS NULL, o.time, o.id",
                 (today.isoformat(),),
@@ -838,9 +838,9 @@ class Store:
                 if day >= today:
                     self._materialize(connection, day)
             rows = connection.execute(
-                "SELECT id,date,title,category,time,status,dismissed_at FROM occurrences "
-                "WHERE date>=? AND date<=? AND status!='cancelled' "
-                "ORDER BY date,time IS NULL,time,id",
+                "SELECT o.id,o.date,o.title,o.category,o.time,o.status,o.dismissed_at,t.recurrence,t.repeat_until FROM occurrences o "
+                "JOIN tasks t ON t.id=o.task_id WHERE o.date>=? AND o.date<=? AND o.status!='cancelled' "
+                "ORDER BY o.date,o.time IS NULL,o.time,o.id",
                 (start.isoformat(), end.isoformat()),
             ).fetchall()
         grouped = {}

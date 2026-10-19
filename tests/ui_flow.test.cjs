@@ -139,6 +139,7 @@ async function tick() { await Promise.resolve(); await Promise.resolve(); await 
 (async()=>{
   await run("load_state()");
   assert.equal(get('connectionError').hidden,true,get('connectionError').textContent);
+  assert.match(run("render_task({id:123,task_id:'range',title:'Спортик',category:'Личное',time:'09:00',date:state.today,recurrence:'every_3_hours',repeat_until:'23:00',status:'pending'},false)"),/09:00–23:00/);
   const installedVersion=current.version;
   current.version='0.0.0';
   await run('load_state()');
