@@ -11,10 +11,18 @@ final class Checkins {
         JSONArray result=new JSONArray();
         for(int minute=start.toSecondOfDay()/60;minute<=LocalTime.parse(end).toSecondOfDay()/60;minute+=hours*60)
             result.put(String.format(java.util.Locale.ROOT,"%02d:%02d",minute/60,minute%60));
+        if(result.length()>0 && !result.getString(result.length()-1).equals(end)) result.put(end);
         return result;
     }
     static void decorate(JSONObject task,JSONObject row,LocalDateTime now) throws Exception {
         if(row.isNull("slots") && row.getString("status").equals("pending")) row.put("slots",plan(task));
+        JSONArray updated=plan(task),existing=row.optJSONArray("slots");
+        if(updated!=null && existing!=null && row.getString("status").equals("pending") && row.isNull("dismissed_at")
+            && row.getString("date").compareTo(now.toLocalDate().toString())>=0 && existing.length()+1==updated.length()) {
+            boolean prefix=true;
+            for(int i=0;i<existing.length();i++) if(!existing.getString(i).equals(updated.getString(i))) prefix=false;
+            if(prefix) row.put("slots",updated);
+        }
         if(row.isNull("checks")) row.put("checks",new JSONObject());
         JSONArray slots=row.optJSONArray("slots"),items=new JSONArray();JSONObject checks=row.getJSONObject("checks");
         if(slots!=null) for(int i=0;i<slots.length();i++) {

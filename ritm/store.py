@@ -294,6 +294,15 @@ class Store:
                      task["reminder"], json.dumps(checkin_plan(dict(task))) if checkin_plan(dict(task)) else None),
                 )
 
+                slots = checkin_plan(dict(task))
+                if slots and len(slots) > 1 and day >= self.clock().date():
+                    row = connection.execute(
+                        "SELECT * FROM occurrences WHERE task_id=? AND date=? AND status='pending' AND dismissed_at IS NULL",
+                        (task['id'], day.isoformat()),
+                    ).fetchone()
+                    if row and unpack(row)['slots'] == slots[:-1] and row['time'] == task['time']:
+                        connection.execute("UPDATE occurrences SET slots=? WHERE id=?", (json.dumps(slots), row['id']))
+
     def _init_checkins(self, connection):
         for row in connection.execute("SELECT o.id,o.time,t.recurrence,t.repeat_until,t.checkins_enabled FROM occurrences o JOIN tasks t ON t.id=o.task_id WHERE o.slots IS NULL AND o.status='pending'").fetchall():
             slots = checkin_plan(dict(row))

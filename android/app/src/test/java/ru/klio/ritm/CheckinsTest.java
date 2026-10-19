@@ -5,6 +5,20 @@ import java.time.*;
 import static org.junit.Assert.*;
 
 public class CheckinsTest {
+    @Test public void explicitEndAddsFinalApproachAndUpgradesPendingDay() throws Exception {
+        JSONObject task=Model.clean(new JSONObject().put("title","Sport").put("recurrence","every_3_hours").put("time","09:00").put("repeat_until","23:00").put("reminder",true).put("checkins_enabled",true),false).put("id","sport");
+        assertEquals("[\"09:00\",\"12:00\",\"15:00\",\"18:00\",\"21:00\",\"23:00\"]",Checkins.plan(task).toString());
+        JSONObject row=Model.occurrence(task,"2026-10-20");
+        row.put("slots",new JSONArray("[\"09:00\",\"12:00\",\"15:00\",\"18:00\",\"21:00\"]"));
+        Checkins.apply(row,"09:00",true,"2026-10-20T09:00:00+03:00");
+        Checkins.decorate(task,row,LocalDateTime.parse("2026-10-20T22:00"));
+        assertEquals(6,row.getJSONArray("slots").length());
+        assertEquals(1,row.getJSONObject("checks").length());
+        assertFalse(row.getJSONArray("checkins").getJSONObject(5).getBoolean("available"));
+        Checkins.decorate(task,row,LocalDateTime.parse("2026-10-20T23:00"));
+        assertTrue(row.getJSONArray("checkins").getJSONObject(5).getBoolean("available"));
+        task.put("repeat_until","21:00");assertEquals(5,Checkins.plan(task).length());
+    }
     @Test public void ordinaryHourlyTaskCompletesOnceAndCheckinsAreOptIn() throws Exception {
         JSONObject task=Model.clean(new JSONObject().put("title","Homework").put("recurrence","every_3_hours").put("time","09:00").put("reminder",true),false);
         assertFalse(task.getBoolean("checkins_enabled"));

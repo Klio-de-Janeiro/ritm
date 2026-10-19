@@ -17,6 +17,8 @@ def plan(task):
     while cursor <= finish:
         times.append(cursor.strftime("%H:%M"))
         cursor += timedelta(hours=hours)
+    if times and times[-1] != end:
+        times.append(end)
     return times
 
 

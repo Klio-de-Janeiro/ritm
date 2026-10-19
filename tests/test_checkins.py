@@ -16,11 +16,11 @@ class CheckinTests(unittest.TestCase):
         self.task=self.store.create_task(dict(title='спорт',time='09:00',reminder=True,recurrence='every_3_hours',checkins_enabled=True))
         self.row=self.store.state('2026-10-18')['tasks'][0]
 
-    def test_range_end_is_in_state_unfinished_and_calendar_without_extra_slot(self):
+    def test_range_end_is_in_state_unfinished_and_calendar_with_final_slot(self):
         self.store.update_task(self.task['id'], {'repeat_until':'23:00'})
         state=self.store.state('2026-10-18')
         self.assertEqual(state['tasks'][0]['repeat_until'],'23:00')
-        self.assertEqual(state['tasks'][0]['slots'],['09:00','12:00','15:00','18:00','21:00'])
+        self.assertEqual(state['tasks'][0]['slots'],['09:00','12:00','15:00','18:00','21:00','23:00'])
         calendar=self.store.calendar('2026-10')
         row=next(row for day in calendar['days'] for row in day['tasks'] if row['date']=='2026-10-18')
         self.assertEqual(row['repeat_until'],'23:00')
@@ -28,6 +28,21 @@ class CheckinTests(unittest.TestCase):
         self.now+=timedelta(days=1)
         unfinished=self.store.state('2026-10-19')['unfinished']
         self.assertEqual(next(row for row in unfinished if row['date']=='2026-10-18')['repeat_until'],'23:00')
+
+    def test_final_slot_upgrade_preserves_marks_and_past_days(self):
+        self.store.update_task(self.task['id'], {'repeat_until':'23:00'})
+        self.store.check(self.row['id'],'09:00')
+        with self.store.connection(write=True) as db:
+            db.execute("UPDATE occurrences SET slots=? WHERE id=?", ('["09:00","12:00","15:00","18:00","21:00"]',self.row['id']))
+        row=self.store.state('2026-10-18')['tasks'][0]
+        self.assertEqual(row['slots'][-1],'23:00')
+        self.assertEqual(len(row['slots']),6)
+        self.assertEqual(len(row['checks']),1)
+        self.assertEqual(self.store.state('2026-10-18')['summary']['xp'],10)
+        self.now=self.now.replace(hour=23)
+        self.assertEqual(len(self.store.due_notifications()),1)
+        self.store.check(row['id'],'23:00')
+        self.assertEqual(len(self.store.state('2026-10-18')['tasks'][0]['checks']),2)
 
     def test_missed_check_can_be_corrected_without_duplicating_xp(self):
         self.assertEqual(self.task['title'],'Спорт')
