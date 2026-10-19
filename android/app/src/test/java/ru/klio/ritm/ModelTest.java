@@ -7,6 +7,70 @@ import static org.junit.Assert.*;
 
 /** Эти проверки запускает BUILD_ANDROID до создания APK. */
 public class ModelTest {
+    @Test public void restoredPlanAutomaticallyRetriesPreviouslyMissingSlot() throws Exception {
+        String date=LocalDate.now().minusDays(1).toString();JSONObject data=Model.empty();
+        JSONObject task=Model.clean(new JSONObject().put("title","Спорт").put("recurrence","every_3_hours").put("reminder",true).put("time","09:00").put("checkins_enabled",true),false)
+            .put("id","sport").put("start_date",date).put("archived_date",JSONObject.NULL);
+        data.getJSONArray("tasks").put(task);data.getJSONArray("occurrences").put(Model.occurrence(task,date));
+        JSONObject op=new JSONObject().put("id","old").put("kind","check").put("task_id","sport").put("date",date).put("time","09:00").put("completed",true).put("completed_at",date+"T10:00:00+03:00").put("before",JSONObject.NULL);
+        data.getJSONArray("conflicts").put(new JSONObject().put("operation",op).put("reason","Подход не найден."));
+        Model.mergeLegacyChecks(data);
+        assertEquals(0,data.getJSONArray("conflicts").length());assertEquals(1,data.getJSONArray("pending").length());
+        assertEquals("check",data.getJSONArray("pending").getJSONObject(0).getString("kind"));
+        assertEquals(date+"T10:00:00+03:00",data.getJSONArray("pending").getJSONObject(0).getString("completed_at"));
+    }
+    @Test public void singleDayLimitFromLaptopDoesNotGenerateCopiesOnPhone() throws Exception {
+        String yesterday=LocalDate.now().minusDays(1).toString(),today=LocalDate.now().toString();
+        JSONObject task=Model.clean(new JSONObject().put("title","Вчерашний план").put("recurrence","daily"),false)
+            .put("id","limited").put("start_date",yesterday).put("occurrence_end_date",yesterday).put("archived_date",JSONObject.NULL);
+        assertTrue(Model.scheduled(task,yesterday));assertFalse(Model.scheduled(task,today));
+        JSONObject data=Model.empty();data.getJSONArray("tasks").put(task);
+        JSONArray rows=Model.view(data,today).getJSONArray("occurrences");
+        assertEquals(1,rows.length());assertEquals(yesterday,rows.getJSONObject(0).getString("date"));
+    }
+    @Test public void legacySlotMarkBecomesSingleCompletionWithoutLosingItsOriginalTime() throws Exception {
+        JSONObject data=Model.empty();String date=LocalDate.now().toString(),at=date+"T09:00:00+03:00";
+        JSONObject task=Model.clean(new JSONObject().put("title","Homework"),false).put("id","homework").put("archived_date",JSONObject.NULL);
+        data.getJSONArray("tasks").put(task);data.getJSONArray("occurrences").put(Model.occurrence(task,date));
+        JSONObject op=new JSONObject().put("id","old-op").put("kind","check").put("task_id","homework").put("date",date)
+            .put("time","09:00").put("completed",true).put("completed_at",at).put("before",JSONObject.NULL);
+        data.getJSONArray("conflicts").put(new JSONObject().put("operation",op).put("reason","Подход не найден."));
+        JSONObject response=response(data,new JSONArray(),new JSONArray());
+        Model.accept(data,response,new JSONArray());
+        assertEquals(0,data.getJSONArray("conflicts").length());
+        JSONObject converted=data.getJSONArray("pending").getJSONObject(0);
+        assertEquals("complete",converted.getString("kind"));assertEquals(at,converted.getString("completed_at"));
+        assertEquals("pending",converted.getJSONObject("before").getString("status"));
+        JSONObject view=Model.view(data,date);
+        assertEquals("done",view.getJSONArray("occurrences").getJSONObject(0).getString("status"));
+        assertEquals(at,view.getJSONArray("occurrences").getJSONObject(0).getString("completed_at"));
+    }
+    @Test public void genuineSlotConflictIsKeptForTasksThatStillUseApproaches() throws Exception {
+        JSONObject data=Model.empty();String date=LocalDate.now().toString();
+        JSONObject task=Model.clean(new JSONObject().put("title","Спорт").put("recurrence","every_3_hours").put("reminder",true).put("time","09:00").put("checkins_enabled",true),false)
+            .put("id","sport").put("archived_date",JSONObject.NULL);
+        data.getJSONArray("tasks").put(task);data.getJSONArray("occurrences").put(Model.occurrence(task,date));
+        data.getJSONArray("conflicts").put(new JSONObject().put("operation",new JSONObject().put("kind","check").put("task_id","sport").put("date",date)));
+        Model.mergeLegacyChecks(data);
+        assertEquals(1,data.getJSONArray("conflicts").length());assertEquals(0,data.getJSONArray("pending").length());
+    }
+    @Test public void connectionUnionsLaptopAndPhoneTasksAndKeepsNewUnsentChanges() throws Exception {
+        JSONObject data=Model.empty(),phone=create(data,"once");
+        JSONArray sent=new JSONArray(data.getJSONArray("pending").toString());
+        JSONObject laptop=Model.clean(new JSONObject().put("title","Ноутбук"),false).put("id",UUID.randomUUID().toString()).put("archived_date",JSONObject.NULL);
+        JSONObject response=response(data,new JSONArray().put(sent.getJSONObject(0).getString("id")),new JSONArray());
+        response.getJSONArray("tasks").put(laptop);
+        response.getJSONArray("occurrences").put(Model.occurrence(laptop,LocalDate.now().toString()));
+        create(data,"daily");
+        Model.accept(data,response,sent);
+        JSONObject merged=Model.view(data,LocalDate.now().toString());
+        assertEquals(3,merged.getJSONArray("tasks").length());
+        assertEquals(1,data.getJSONArray("pending").length());
+        assertTrue(Model.map(merged.getJSONArray("tasks"),false).containsKey(phone.getString("id")));
+        assertTrue(Model.map(merged.getJSONArray("tasks"),false).containsKey(laptop.getString("id")));
+        Model.accept(data,Model.copy(response).put("accepted",new JSONArray()),new JSONArray());
+        assertEquals(3,Model.view(data,LocalDate.now().toString()).getJSONArray("tasks").length());
+    }
     @Test public void onceReminderDefaultsToOneDayAndLegacyOnceAlsoExpires() throws Exception {
         LocalDate day=LocalDate.now();
         JSONObject task=Model.clean(new JSONObject().put("title","Лекция по физике").put("reminder",true).put("time","21:00"),false);

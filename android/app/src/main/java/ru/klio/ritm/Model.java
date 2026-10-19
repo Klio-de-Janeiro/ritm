@@ -65,6 +65,7 @@ public final class Model {
     }
     public static boolean scheduled(JSONObject task, String date) throws Exception {
         LocalDate day = LocalDate.parse(date), start = LocalDate.parse(task.getString("start_date"));
+        if(!task.isNull("occurrence_end_date") && date.compareTo(task.getString("occurrence_end_date"))>0) return false;
         String archived = task.optString("archived_date", "");
         if (day.isBefore(start) || (!archived.isEmpty() && date.compareTo(archived)>=0)) return false;
         switch (task.getString("recurrence")) {
@@ -166,6 +167,7 @@ public final class Model {
             .put("pending_count",pending.length()).put("conflicts",data.getJSONArray("conflicts"))
             .put("settings",data.getJSONObject("settings")).put("last_sync",data.optString("last_sync"))
             .put("sync_error",data.optString("sync_error")).put("connected",!data.getJSONObject("connection").optString("address").isEmpty())
+            .put("sync_transport",data.optString("sync_transport"))
             .put("address",data.getJSONObject("connection").optString("address"));
     }
     public static JSONObject clean(JSONObject source, boolean allowPast) throws Exception {
@@ -315,6 +317,39 @@ public final class Model {
         }
         data.put("pending",remaining).put("tasks",tasks).put("occurrences",occurrences).put("server_id",server)
             .put("last_sync",OffsetDateTime.now().toString()).put("sync_error","");
+        mergeLegacyChecks(data);
+    }
+    /** Старые отметки подходов обычного дела становятся его единым выполнением. */
+    static void mergeLegacyChecks(JSONObject data) throws Exception {
+        Map<String,JSONObject> tasks=map(data.getJSONArray("tasks"),false),rows=map(data.getJSONArray("occurrences"),true);
+        JSONArray conflicts=data.getJSONArray("conflicts"),keep=new JSONArray(),queue=data.getJSONArray("pending");
+        for(int i=0;i<conflicts.length();i++) {
+            JSONObject conflict=conflicts.getJSONObject(i),op=conflict.getJSONObject("operation");
+            String id=op.optString("task_id"),date=op.optString("date");
+            JSONObject task=tasks.get(id),row=rows.get(id+"|"+date);
+            boolean busy=false;
+            for(int n=0;n<queue.length();n++) {JSONObject queued=queue.getJSONObject(n);if(id.equals(queued.optString("task_id"))&&date.equals(queued.optString("date"))) busy=true;}
+            boolean restoredSlot=false;
+            if(!busy && op.optString("kind").equals("check") && conflict.optString("reason").equals("Подход не найден.") && row!=null && row.isNull("dismissed_at") && !row.getString("status").equals("cancelled")) {
+                JSONArray slots=row.optJSONArray("slots");JSONObject checks=row.optJSONObject("checks");
+                Object current=checks==null?JSONObject.NULL:nullable(checks,op.optString("time"));
+                if(slots!=null && equal(current,nullable(op,"before"))) for(int n=0;n<slots.length();n++) if(slots.getString(n).equals(op.optString("time"))) restoredSlot=true;
+            }
+            if(restoredSlot) {
+                queue.put(copy(op).put("id",UUID.randomUUID().toString()));
+                continue;
+            }
+            if(!busy && op.optString("kind").equals("check") && task!=null && !task.optBoolean("checkins_enabled",false)
+                && row!=null && row.optJSONArray("slots")==null && !row.getString("status").equals("cancelled") && row.isNull("dismissed_at")) {
+                JSONObject converted=copy(op).put("id",UUID.randomUUID().toString()).put("kind","complete");
+                boolean completed=op.getBoolean("completed");
+                Object previous=nullable(op,"before");
+                converted.put("before",completed?new JSONObject().put("status",row.getString("status")).put("completed_at",nullable(row,"completed_at"))
+                    :new JSONObject().put("status",previous==JSONObject.NULL?"pending":"done").put("completed_at",previous));
+                converted.remove("time");queue.put(converted);
+            } else keep.put(conflict);
+        }
+        data.put("conflicts",keep);
     }
     /** Сохранить проигравшую правку до явного выбора, не заменяя данные молча. */
     public static void resolve(JSONObject data,int index,boolean keepPhone) throws Exception {

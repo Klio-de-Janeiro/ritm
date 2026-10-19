@@ -18,6 +18,7 @@ from .store import Store
 from .tray import WindowsTray
 from .windows_identity import WindowIdentity, install_shortcuts
 from .mobile_sync import SyncService
+from .usb_sync import start as start_usb_sync
 from .notifications import WindowsNotifications
 
 
@@ -75,6 +76,7 @@ def main():
         session = secrets.token_urlsafe(32)
         store = Store(directory / "ritm.sqlite3")
         mobile_sync = SyncService(store, directory)
+        start_usb_sync(directory, stop_event)
         window_identity = WindowIdentity(directory, stop_event)
         if not arguments.no_tray:
             notifications = WindowsNotifications(directory, WEB_ROOT / "icon.ico")

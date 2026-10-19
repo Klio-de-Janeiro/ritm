@@ -10,6 +10,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import re
 import secrets
 import socket
 import threading
@@ -43,6 +44,22 @@ def normalized(row):
     if "checkins_enabled" in result:
         result["checkins_enabled"] = bool(result["checkins_enabled"])
     return result
+
+
+def occurrence_limits(db):
+    """Передать телефону ограничения прежних однодневных планов из базы."""
+    limits = {}
+    for row in db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'ritm_single_day_%'"):
+        match = re.search(r"NEW\.task_id\s+IN\s*\(([^)]+)\)\s+AND\s+NEW\.date\s*!=\s*'(\d{4}-\d{2}-\d{2})'", row[0] or "", re.I)
+        if not match:
+            continue
+        try:
+            end = parse_day(match[2]).isoformat()
+        except ValidationError:
+            continue
+        for task_id in re.findall(r"'([a-f0-9-]{36})'", match[1], re.I):
+            limits[task_id] = min(end, limits.get(task_id, end))
+    return limits
 
 
 class SyncEngine:
@@ -89,7 +106,8 @@ class SyncEngine:
                     conflicts.append({"id": op_id, "reason": str(error)})
                 finally:
                     db.execute("RELEASE operation")
-            tasks = [normalized(row) for row in db.execute("SELECT * FROM tasks")]
+            limits = occurrence_limits(db)
+            tasks = [dict(normalized(row), occurrence_end_date=limits.get(row["id"])) for row in db.execute("SELECT * FROM tasks")]
             occurrences = [normalized(row) for row in db.execute(
                 "SELECT task_id,date,title,notes,category,priority,time,reminder,"
                 "status,completed_at,dismissed_at,slots,checks FROM occurrences WHERE status!='cancelled' OR dismissed_at IS NOT NULL OR (checks IS NOT NULL AND checks!='{}')")]
@@ -146,9 +164,13 @@ class SyncEngine:
             slot = op.get("time")
             current_check = unpack(row)["checks"].get(slot)
             before = op.get("before")
-            if current_check != before:
-                raise ValidationError("Этот подход уже изменён на ноутбуке.",409)
             completed = as_bool(op.get("completed"),"completed")
+            if slot not in (unpack(row)["slots"] or []):
+                raise ValidationError("Подход не найден.",409)
+            if current_check != before:
+                if bool(current_check) == completed:
+                    return  # Одинаковые отметки двух устройств — одно выполнение.
+                raise ValidationError("Этот подход уже изменён на ноутбуке.",409)
             try:
                 when = datetime.fromisoformat(op["completed_at"]) if completed else None
             except (KeyError,TypeError,ValueError) as error:
@@ -161,6 +183,8 @@ class SyncEngine:
             if not row:
                 raise ValidationError("Запись не найдена.", 409)
             desired = as_bool(op.get("dismissed"), "dismissed")
+            if bool(row["dismissed_at"]) == desired:
+                return
             before = op.get("before", {})
             if not isinstance(before, dict) or before.get("status") != row["status"] or before.get("dismissed_at") != row["dismissed_at"]:
                 raise ValidationError("Дело изменилось на ноутбуке.", 409)

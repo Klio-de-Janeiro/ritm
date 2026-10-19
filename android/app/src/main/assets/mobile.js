@@ -75,7 +75,7 @@ function render() {
   $("#reviewDate").max=today();$("#reviewDate").value=reviewDay;
   renderActivity(history);renderDayReview();
   $("#historyList").innerHTML=history.length?history.slice(0,200).map(rowHtml).join(""):'<div class="empty">Отметь первую задачу. Каждый выполненный шаг приносит 10 очков.</div>';
-  $("#syncStatus").textContent=(state.connected?"Подключение: "+state.address:"Подключение не настроено.")+ (state.last_sync?"\nПоследний обмен: "+new Date(state.last_sync).toLocaleString("ru-RU"):"")+ (state.sync_error?"\n"+state.sync_error:"");
+  $("#syncStatus").textContent=(state.connected?(state.sync_transport==="USB"?"Подключение: USB-отладка · ноутбук":"Подключение: "+state.address):"Подключение не настроено.")+ (state.last_sync?"\nПоследний обмен: "+new Date(state.last_sync).toLocaleString("ru-RU"):"")+ (state.sync_error?"\n"+state.sync_error:"");
   $("#syncStatus").style.whiteSpace="pre-line";
   $("#connectForm").hidden=state.connected;
   $("#disconnect").hidden=!state.connected;

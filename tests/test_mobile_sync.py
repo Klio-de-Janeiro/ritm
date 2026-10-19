@@ -64,6 +64,25 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["tasks"][0]["title"], "Правка ноутбука")
         self.assertEqual(result["tasks"][0]["notes"], "С телефона")
 
+    def test_phone_and_laptop_tasks_union_and_repeat_exchange_does_not_duplicate(self):
+        laptop=self.store.create_task(dict(title="С ноутбука"))
+        phone=self.operation("create",str(uuid.uuid4()),values=dict(title="С телефона",start_date="2026-10-16"))
+        done=self.operation("complete",phone['task_id'],date="2026-10-16",completed=True,
+                            completed_at=self.now.isoformat(),before=dict(status="pending",completed_at=None))
+        response=self.exchange([phone,done])
+        self.assertEqual({task['id'] for task in response['tasks']},{laptop['id'],phone['task_id']})
+        self.assertEqual(response['conflicts'],[])
+        replay=self.exchange([phone,done])
+        self.assertEqual(len(replay['tasks']),2)
+        self.assertEqual(self.store.state('2026-10-16')['summary']['xp'],10)
+
+    def test_single_day_database_limits_are_shared_with_phone(self):
+        _,task=self.create()
+        with self.store.connection(write=True) as db:
+            db.execute("CREATE TRIGGER ritm_single_day_test BEFORE INSERT ON occurrences WHEN NEW.task_id IN ('"+task['id']+"') AND NEW.date != '2026-10-16' BEGIN SELECT RAISE(IGNORE); END")
+        response=self.exchange()
+        self.assertEqual(response['tasks'][0]['occurrence_end_date'],'2026-10-16')
+
     def test_offline_plan_preserves_each_missed_day_before_later_edit(self):
         op = self.operation("create", str(uuid.uuid4()), values={
             "title": "Первоначальный план", "start_date": "2026-10-13", "recurrence": "daily"})

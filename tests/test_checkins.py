@@ -62,7 +62,7 @@ class CheckinTests(unittest.TestCase):
         self.assertEqual(result['accepted'],[first['id'],second['id']])
         self.assertEqual(len(result['occurrences'][0]['checks']),2)
         conflict=engine.exchange(dict(protocol=2,operations=[op('09:00')]))
-        self.assertEqual(len(conflict['conflicts']),1)
+        self.assertEqual(conflict['conflicts'],[])
         self.assertEqual(self.store.state('2026-10-18')['summary']['xp'],20)
 
     def test_legacy_completed_day_keeps_its_original_ten_xp(self):

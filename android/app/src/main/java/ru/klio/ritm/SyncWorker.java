@@ -4,6 +4,8 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.LinkProperties;
+import android.net.RouteInfo;
 import androidx.work.*;
 import org.json.*;
 import java.net.*;
@@ -47,9 +49,16 @@ public class SyncWorker extends Worker {
                     for(int i=0;i<Math.min(100,queued.length());i++) sent.put(queued.get(i));
                     JSONObject request=new JSONObject().put("protocol",2).put("server_id",initial.optString("server_id"))
                         .put("operations",sent);
-                    Network network=localNetwork(getApplicationContext());
                     JSONObject target=new JSONObject(connection.toString());
-                    if(page==0 && !initial.optString("server_id").isEmpty()) {
+                    JSONObject response=null;
+                    String transport="LAN";
+                    // ADB reverse is local to this phone. Pairing identity and token are unchanged.
+                    if(!initial.optString("server_id").isEmpty()) {
+                        try { response=exchangeUsb(connection,request);transport="USB"; }
+                        catch(IOException ignored) { /* No cable/tunnel: keep using the saved LAN pairing. */ }
+                    }
+                    Network network=localNetwork(getApplicationContext(),target.getString("address"));
+                    if(response==null && page==0 && !initial.optString("server_id").isEmpty()) {
                         try(DatagramSocket socket=new DatagramSocket(null)) {
                             if(network!=null) network.bindSocket(socket);
                             socket.bind(new InetSocketAddress(0));
@@ -58,16 +67,30 @@ public class SyncWorker extends Worker {
                             if(found!=null) target.put("address",address(found));
                         } catch(Exception ignored) { /* The saved address remains usable without broadcast. */ }
                     }
-                    JSONObject response=exchange(target,request,network);
+                    if(response==null) {
+                        network=localNetwork(getApplicationContext(),target.getString("address"));
+                        try {response=exchange(target,request,network);}
+                        catch(IOException error) {throw new IOException("Нет соединения с ноутбуком: "+target.getString("address")+". Подключи USB-кабель с разрешённой отладкой или общую локальную сеть. Изменения сохранены на телефоне.",error);}
+                    }
+                    boolean remaining;
                     synchronized(Storage.LOCK) {
                         JSONObject fresh=storage.read();
                         // Подключение могло быть отключено или изменено, пока ответ шёл по сети.
                         if(!fresh.getJSONObject("connection").toString().equals(connection.toString())) return Result.success();
                         Model.accept(fresh,response,sent);
+                        fresh.put("sync_transport",transport);
                         fresh.put("connection",target);storage.write(fresh);
+                        remaining=fresh.getJSONArray("pending").length()>0;
+                        android.util.Log.i("RitmSync","transport="+transport+" sent="+sent.length()+" pending="+fresh.getJSONArray("pending").length()+" conflicts="+fresh.getJSONArray("conflicts").length()+" tasks="+fresh.getJSONArray("tasks").length());
+                        JSONArray conflicts=fresh.getJSONArray("conflicts");
+                        for(int i=0;i<conflicts.length();i++) {
+                            JSONObject conflict=conflicts.getJSONObject(i);
+                            JSONObject operation=conflict.getJSONObject("operation");
+                            android.util.Log.i("RitmSync","conflict kind="+operation.optString("kind")+" task="+operation.optString("task_id")+" date="+operation.optString("date")+" reason="+conflict.optString("reason"));
+                        }
                     }
                     Reminders.refresh(getApplicationContext());
-                    if(queued.length()<=100) break;
+                    if(!remaining) break;
                 }
                 return Result.success();
             } catch(Exception error) {
@@ -77,19 +100,33 @@ public class SyncWorker extends Worker {
             }
         }
     }
-    static Network localNetwork(Context context) {
+    static Network localNetwork(Context context,String address) throws Exception {
         ConnectivityManager manager=context.getSystemService(ConnectivityManager.class);
+        InetAddress target=InetAddress.getByName(new URI(SyncWorker.address(address)).getHost());
+        Network selected=null;int prefix=0;
         for(Network network:manager.getAllNetworks()) {
             NetworkCapabilities caps=manager.getNetworkCapabilities(network);
             if(caps!=null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-                && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) return network;
+                && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                LinkProperties links=manager.getLinkProperties(network);
+                if(links!=null) for(RouteInfo route:links.getRoutes()) {
+                    int length=route.getDestination().getPrefixLength();
+                    if(length>prefix && route.getDestination().contains(target)) {prefix=length;selected=network;}
+                }
+            }
         }
-        return null;
+        return selected;
+    }
+    static JSONObject exchangeUsb(JSONObject connection,JSONObject body) throws Exception {
+        return httpExchange(new URL("http://127.0.0.1:8769/sync/v1"),connection,body,null,1000);
     }
     static JSONObject exchange(JSONObject connection,JSONObject body,Network network) throws Exception {
         URL url=new URL(address(connection.getString("address"))+"/sync/v1");
+        return httpExchange(url,connection,body,network,7000);
+    }
+    static JSONObject httpExchange(URL url,JSONObject connection,JSONObject body,Network network,int connectTimeout) throws Exception {
         HttpURLConnection http=(HttpURLConnection)(network==null?url.openConnection(Proxy.NO_PROXY):network.openConnection(url,Proxy.NO_PROXY));
-        http.setConnectTimeout(7000);http.setReadTimeout(20000);http.setInstanceFollowRedirects(false);
+        http.setConnectTimeout(connectTimeout);http.setReadTimeout(20000);http.setInstanceFollowRedirects(false);
         http.setRequestMethod("POST");http.setDoOutput(true);
         http.setRequestProperty("Content-Type","application/json");
         http.setRequestProperty("Authorization","Bearer "+connection.getString("token"));
