@@ -6,6 +6,26 @@ from ritm.usb_sync import devices, reconnect
 
 
 class UsbTests(unittest.TestCase):
+    def test_several_devices_get_independent_tunnels_and_failure_does_not_stop_others(self):
+        tunnels = []
+        def command(adb, *args):
+            if args == ("devices",):
+                return "first\tdevice\nbroken\tdevice\nsecond\tdevice\nlocked\tunauthorized"
+            if args[2:5] == ("shell", "pm", "path"):
+                if args[1] == "broken":
+                    raise OSError("disconnected")
+                return "package:/data/app/base.apk"
+            if args[2:] == ("reverse", "--list"):
+                return ""
+            tunnels.append(args)
+            return ""
+        with patch("ritm.usb_sync.run", side_effect=command):
+            reconnect("adb", 8769)
+        self.assertEqual(tunnels, [
+            ("-s", "first", "reverse", "--no-rebind", "tcp:8769", "tcp:8769"),
+            ("-s", "second", "reverse", "--no-rebind", "tcp:8769", "tcp:8769"),
+        ])
+
     def test_only_authorized_physical_devices_are_used(self):
         self.assertEqual(devices("List of devices attached\nphone\tdevice\nlocked\tunauthorized\nold\toffline\nemulator-5554\tdevice\n1.2.3.4:5555\tdevice\n"), ["phone"])
 

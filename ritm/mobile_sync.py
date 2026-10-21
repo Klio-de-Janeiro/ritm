@@ -70,8 +70,10 @@ class SyncEngine:
         with store.connection(write=True) as db:
             db.execute("CREATE TABLE IF NOT EXISTS mobile_receipts "
                        "(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS mobile_devices "
+                       "(id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen TEXT NOT NULL, transport TEXT NOT NULL)")
 
-    def exchange(self, body):
+    def exchange(self, body, transport="LAN"):
         """Вернуть квитанции и согласованный снимок в той же транзакции."""
         if body.get("protocol") != 2:
             raise ValidationError("Обнови обе версии Ритма: протокол отличается.", 409)
@@ -80,6 +82,14 @@ class SyncEngine:
         operations = body.get("operations", [])
         if not isinstance(operations, list) or len(operations) > 100:
             raise ValidationError("Отправляй не больше 100 изменений за один запрос.")
+        device = body.get("device")
+        if device is not None:
+            if not isinstance(device, dict):
+                raise ValidationError("Некорректное устройство.")
+            identifier(device.get("id"))
+            name = device.get("name")
+            if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80 or any(ord(c) < 32 for c in name):
+                raise ValidationError("Название устройства должно содержать от 1 до 80 символов.")
         self.store.refresh()
         accepted, conflicts = [], []
         with self.store.connection(write=True) as db:
@@ -114,6 +124,10 @@ class SyncEngine:
             for row in occurrences:
                 row["slots"] = json.loads(row["slots"]) if row["slots"] else None
                 row["checks"] = json.loads(row["checks"]) if row["checks"] else {}
+            if device is not None:
+                db.execute("INSERT INTO mobile_devices VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                           "name=excluded.name,last_seen=excluded.last_seen,transport=excluded.transport",
+                           (device["id"], name.strip(), self.store.clock().isoformat(), transport))
         return {"protocol": 2, "server_id": self.server_id, "accepted": accepted,
                 "conflicts": conflicts, "tasks": tasks, "occurrences": occurrences,
                 "server_time": self.store.clock().isoformat()}
@@ -332,7 +346,7 @@ class SyncHandler(BaseHTTPRequestHandler):
                 raise ValidationError("Некорректный JSON.") from error
             if not isinstance(body, dict):
                 raise ValidationError("Ожидается объект.")
-            self._send(200, self.server.engine.exchange(body))
+            self._send(200, self.server.engine.exchange(body, transport="USB" if address.is_loopback else "LAN"))
         except ValidationError as error:
             self._send(error.status, {"error": str(error)})
         except (OSError, TimeoutError):
@@ -460,6 +474,9 @@ class SyncService:
                     addresses.add(str(address))
         except OSError:
             pass
+        with self.store.connection() as db:
+            devices = [dict(row) for row in db.execute("SELECT * FROM mobile_devices ORDER BY last_seen DESC,id")]
         return {"enabled": bool(self.server), "error": self.error,
                 "addresses": [f"http://{ip}:{self.config['port']}" for ip in sorted(addresses)],
+                "usb_address": "http://127.0.0.1:8769", "devices": devices,
                 "token": self.config["token"] if self.server else ""}

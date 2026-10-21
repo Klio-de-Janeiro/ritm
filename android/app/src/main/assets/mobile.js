@@ -129,6 +129,7 @@ function shiftDay(delta){const date=new Date(day+"T12:00:00");date.setDate(date.
 $("#previousDay").onclick=()=>shiftDay(-1);$("#nextDay").onclick=()=>shiftDay(1);$("#selectedDay").onchange=()=>{if($("#selectedDay").value){day=$("#selectedDay").value;refresh(true);}};
 $("#syncNow").onclick=()=>protect(()=>{call("sync");toast(state?.connected?"Пробуем связаться с ноутбуком. Очередь сохранена.":"Укажи подключение в настройках.");if(!state?.connected)selectPage("settings");});
 $("#connectForm").onsubmit=event=>{event.preventDefault();protect(()=>{const parts=$("#serverAddress").value.trim().split("|");call("connect",{address:parts[0],token:parts[1]||$("#serverToken").value});$("#serverToken").value="";$("#serverAddress").value=parts[0];refresh();toast("Подключение сохранено. Пробуем обменяться данными.");});};
+$("#connectUsb").onclick=()=>{$("#serverAddress").value="http://127.0.0.1:8769";$("#serverToken").focus();toast("Вставь код с компьютера и разреши USB-отладку на телефоне.");};
 $("#disconnect").onclick=()=>protect(()=>{call("disconnect");refresh();toast("Обмен отключён. Данные сохранены.");});
 function settings(values){call("settings",{values});refresh();}
 $("#notifications").onchange=e=>protect(()=>settings({notifications:e.target.checked}));

@@ -9,6 +9,20 @@ import java.util.concurrent.*;
 import static org.junit.Assert.*;
 
 public class SyncTransportTest {
+    @Test public void pairingAllowsUsbAndPrivateLanOnly() throws Exception {
+        assertEquals("http://127.0.0.1:8769",SyncWorker.address("http://127.0.0.1:8769"));
+        assertEquals("http://192.168.1.10:8769",SyncWorker.address("http://192.168.1.10:8769"));
+        for(String text:new String[]{"http://127.0.0.1:80","http://127.0.0.2:8769","http://8.8.8.8:8769","https://192.168.1.10:8769","http://localhost:8769"}) {
+            try {SyncWorker.address(text);fail(text);} catch(IllegalArgumentException expected) {}
+        }
+    }
+    @Test public void eachInstallationKeepsOneIdentityAcrossTransports() throws Exception {
+        JSONObject a=Model.empty(),b=Model.empty();
+        JSONObject first=Model.device(a,"Redmi");
+        assertEquals(first.getString("id"),Model.device(Model.copy(a),"Redmi").getString("id"));
+        assertNotEquals(first.getString("id"),Model.device(b,"Tablet").getString("id"));
+        assertEquals("Android",Model.device(a,"").getString("name"));
+    }
     @Test public void localTunnelUsesAuthenticatedPostAndReadsFramedResponse() throws Exception {
         try(ServerSocket server=new ServerSocket(0)) {
             ExecutorService executor=Executors.newSingleThreadExecutor();

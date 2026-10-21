@@ -172,5 +172,8 @@ run(fs.readFileSync(path.join(root,'mobile.js'),'utf8'));
   assert.match(get('dailyCount').textContent,/0 \/ 0/);
 
   assert.match(run("rowHtml({task_id:'range',title:'Спортик',time:'09:00',date:today(),recurrence:'every_3_hours',repeat_until:'23:00',status:'pending'})"),/09:00–23:00/);
+  get('connectUsb').onclick();
+  assert.equal(get('serverAddress').value,'http://127.0.0.1:8769');
+  assert.equal(document.activeElement,get('serverToken'));
   console.log('Mobile: legacy colors, preview during polling, save/cancel, light theme, calendar alignment, scroll and escaped history OK.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

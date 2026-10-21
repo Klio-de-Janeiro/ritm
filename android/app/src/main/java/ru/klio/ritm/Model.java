@@ -55,6 +55,13 @@ public final class Model {
     public static JSONObject copy(JSONObject value) throws Exception { return new JSONObject(value.toString()); }
     static Object nullable(JSONObject value, String key) { return value.has(key) ? value.opt(key) : JSONObject.NULL; }
     static boolean equal(Object a, Object b) { return Objects.equals(a, b); }
+    static JSONObject device(JSONObject data,String name) throws Exception {
+        if(data.optString("device_id").isEmpty()) data.put("device_id",UUID.randomUUID().toString());
+        String label=name==null?"Android":name.replaceAll("[\\p{Cntrl}]", " ").trim();
+        if(label.isEmpty()) label="Android";
+        if(label.length()>80) label=label.substring(0,80);
+        return new JSONObject().put("id",data.getString("device_id")).put("name",label);
+    }
     public static JSONObject empty() throws Exception {
         return new JSONObject().put("schema",1).put("server_id", "")
             .put("tasks",new JSONArray()).put("occurrences",new JSONArray())

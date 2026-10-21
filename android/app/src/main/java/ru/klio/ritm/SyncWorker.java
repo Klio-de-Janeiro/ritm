@@ -18,23 +18,23 @@ public class SyncWorker extends Worker {
     private static final Object NETWORK_LOCK=new Object();
     public SyncWorker(Context context,WorkerParameters parameters) {super(context,parameters);}
     public static void schedule(Context context) {
-        Constraints constraints=new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork("ritm-periodic",ExistingPeriodicWorkPolicy.KEEP,
-            new PeriodicWorkRequest.Builder(SyncWorker.class,15,TimeUnit.MINUTES).setConstraints(constraints).build());
+        WorkManager.getInstance(context).cancelUniqueWork("ritm-now"); // Retire jobs that required Wi-Fi before USB support.
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork("ritm-periodic",ExistingPeriodicWorkPolicy.UPDATE,
+            new PeriodicWorkRequest.Builder(SyncWorker.class,15,TimeUnit.MINUTES).build());
     }
     public static void now(Context context) {
-        WorkManager.getInstance(context).enqueueUniqueWork("ritm-now",ExistingWorkPolicy.KEEP,
-            new OneTimeWorkRequest.Builder(SyncWorker.class).setConstraints(new Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED).build()).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build());
+        WorkManager.getInstance(context).enqueueUniqueWork("ritm-now-local",ExistingWorkPolicy.KEEP,
+            new OneTimeWorkRequest.Builder(SyncWorker.class).setBackoffCriteria(BackoffPolicy.EXPONENTIAL,30,TimeUnit.SECONDS).build());
     }
     /** Разрешены только частные IPv4; без DNS, редиректов и произвольного URL. */
     public static String address(String text) throws Exception {
         URI uri=new URI(text.trim());String host=uri.getHost();
         if(!"http".equals(uri.getScheme()) || host==null || !host.matches("[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+") || uri.getUserInfo()!=null || uri.getQuery()!=null || uri.getFragment()!=null || !(uri.getPath().isEmpty() || uri.getPath().equals("/"))) throw new IllegalArgumentException("Нужен адрес вида http://192.168.1.10:8769");
         InetAddress ip=InetAddress.getByName(host);
-        if(!(ip instanceof Inet4Address) || !ip.isSiteLocalAddress()) throw new IllegalArgumentException("Разрешены только адреса домашней сети: 10.x, 172.16–31.x, 192.168.x.");
         int port=uri.getPort()==-1?8769:uri.getPort();
         if(port<1 || port>65535) throw new IllegalArgumentException("Некорректный порт.");
+        boolean usb=host.equals("127.0.0.1") && port==8769;
+        if(!(ip instanceof Inet4Address) || !(ip.isSiteLocalAddress() || usb)) throw new IllegalArgumentException("Нужен адрес локальной сети или USB: http://127.0.0.1:8769");
         return "http://"+ip.getHostAddress()+":"+port;
     }
     @Override public Result doWork() {
@@ -42,22 +42,28 @@ public class SyncWorker extends Worker {
             Storage storage=new Storage(getApplicationContext());
             try {
                 for(int page=0;page<50;page++) {
-                    JSONObject initial; synchronized(Storage.LOCK) {initial=storage.read();}
+                    JSONObject initial,device;
+                    synchronized(Storage.LOCK) {
+                        initial=storage.read();
+                        String previous=initial.optString("device_id");
+                        device=Model.device(initial,android.os.Build.MODEL);
+                        if(!previous.equals(initial.getString("device_id"))) storage.write(initial);
+                    }
                     JSONObject connection=initial.getJSONObject("connection");
                     if(connection.optString("address").isEmpty()) return Result.success();
                     JSONArray queued=initial.getJSONArray("pending"), sent=new JSONArray();
                     for(int i=0;i<Math.min(100,queued.length());i++) sent.put(queued.get(i));
                     JSONObject request=new JSONObject().put("protocol",2).put("server_id",initial.optString("server_id"))
-                        .put("operations",sent);
+                        .put("operations",sent).put("device",device);
                     JSONObject target=new JSONObject(connection.toString());
                     JSONObject response=null;
                     String transport="LAN";
                     // ADB reverse is local to this phone. Pairing identity and token are unchanged.
-                    if(!initial.optString("server_id").isEmpty()) {
+                    if(!initial.optString("server_id").isEmpty() || connection.getString("address").equals("http://127.0.0.1:8769")) {
                         try { response=exchangeUsb(connection,request);transport="USB"; }
                         catch(IOException ignored) { /* No cable/tunnel: keep using the saved LAN pairing. */ }
                     }
-                    Network network=localNetwork(getApplicationContext(),target.getString("address"));
+                    Network network=response==null?localNetwork(getApplicationContext(),target.getString("address")):null;
                     if(response==null && page==0 && !initial.optString("server_id").isEmpty()) {
                         try(DatagramSocket socket=new DatagramSocket(null)) {
                             if(network!=null) network.bindSocket(socket);
@@ -108,6 +114,7 @@ public class SyncWorker extends Worker {
             NetworkCapabilities caps=manager.getNetworkCapabilities(network);
             if(caps!=null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                 && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                if(target.isLoopbackAddress() && selected==null) selected=network;
                 LinkProperties links=manager.getLinkProperties(network);
                 if(links!=null) for(RouteInfo route:links.getRoutes()) {
                     int length=route.getDestination().getPrefixLength();
